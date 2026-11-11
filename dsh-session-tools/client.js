@@ -51,6 +51,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     archTitle: "会话管理",
     openSessionsDir: "打开会话目录",
     openSessionsDirFailed: "打开目录失败: ",
+    compatDedig: "修复 Git 页签与绘画插件的样式冲突",
     archDesc: "按工作区查看全部会话或已归档会话；全部会话只能归档，已归档可以恢复或永久删除。",
     tabAll: "全部会话",
     tabArchived: "已归档",
@@ -112,6 +113,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     archTitle: "Session manager",
     openSessionsDir: "Open sessions folder",
     openSessionsDirFailed: "Could not open folder: ",
+    compatDedig: "Fix Git tab styles clashing with the image-gen plugin",
     archDesc: "Browse all sessions or archived sessions by workspace. The all-sessions view can only archive; archived sessions can be restored or deleted permanently.",
     tabAll: "All sessions",
     tabArchived: "Archived",
@@ -201,9 +203,14 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     return t("timeAgo", { t: t("timeYears", { n: Math.floor(diff / (365 * 86400e3)) }) });
   }
 
-  function installStyles() {
+  // 插件冲突修复开关：默认开。关闭后不再输出 .dig-* 那批覆盖规则。
+  var dedigEnabled = true;
+
+  function installStyles(force) {
     if (typeof document === "undefined") return;
-    if (document.querySelector("style[data-plugin-css=" + JSON.stringify("dsh-session-tools/section.css") + "]") !== null) return;
+    var existing = document.querySelector("style[data-plugin-css=" + JSON.stringify("dsh-session-tools/section.css") + "]");
+    if (existing !== null && force !== true) return;
+    if (existing !== null) existing.remove();
     var tag = document.createElement("style");
     tag.dataset.plugin = "dsh-session-tools";
     tag.dataset.pluginCss = "dsh-session-tools/section.css";
@@ -272,6 +279,70 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       "[class*=\"footerActions\"] button{width:auto!important;height:28px!important;min-height:28px!important;padding:0 8px!important;box-sizing:border-box!important}" +
       // 账号胶囊跟着缩：宽度按内容（头像+昵称），高度与导航行一致（28px），不再拉满整行
       "[class*=\"settingsArea\"] button{width:auto!important;height:28px!important;min-height:28px!important;padding:0 8px!important;border-radius:8px!important;box-sizing:border-box!important}" +
+      // ═══════════════════════════════════════════════════════════════════
+      // 【插件冲突修复 · 开始 · 整块可删】
+      // 冲突双方：
+      //   · dsh-ide-git 0.30.0          —— Git 页签（正常应显示）
+      //   · @copylee/dsh-image-gen 0.2.0 —— 「绘画」插件（污染源）
+      // 现象：绘画插件使用同一套 .dig-* 类名并全局注入样式，把 Git 页签改坏：
+      //   提交列被压成 112px / 分支徽章变 52×52 方块 / 搜索框被撑高到 289px /
+      //   顶部下拉被拉满整行 / 各种 padding、高度错位。
+      // 处理：只对 Git 页签容器（.dig-conversation-seat）内的元素，把布局属性
+      //       还原成 dsh-ide-git 自己的原生值；绘画插件自己的页面完全不受影响。
+      // 值来源：dsh-ide-git 0.30.0 的 src/client.js（逐条对照）。
+      // ★ 开关：设置 →「会话管理」面板底部「修复 Git 页签与绘画插件的样式冲突」
+      //   （存插件目录 compat.json，默认开；关闭后这段规则不再输出，即时生效）
+      // ★ 卸载「绘画」插件后：把「开始」到「结束」之间的这一整段直接删掉即可，
+      //   不会有任何残留依赖；也可以只把开关关掉（效果相同，代码留作以后复用）。
+      // ★ dsh-ide-git 升级后：这些硬编码值可能过期，需要回来复核一遍。
+      // ═══════════════════════════════════════════════════════════════════
+      (dedigEnabled ? "" +
+      "[class*=\"dig-conversation-seat\"] [class*=\"dig-history\"]{width:auto!important;flex:1 1 auto!important;min-width:0!important}" +
+      "@media (max-width:900px){[class*=\"dig-conversation-seat\"] [class*=\"dig-history\"]{display:flex!important}}" +
+      // 同一批冲突：绘画插件把 .dig-ref（它用作 52×52 的缩略图）也全局注入了，
+      // 把 git 的分支/标签徽章撑成 52×52 方块、文字被裁掉。这里只恢复 git 的原生形状。
+      "[class*=\"dig-conversation-seat\"] [class*=\"dig-ref\"]{width:auto!important;height:auto!important;border:0!important;border-radius:999px!important;background:var(--dsw-alias-interactive-bg-hover)!important;position:static!important}" +
+      // ── 全量对齐：把两个插件所有「布局属性」冲突一次性还原成 git 的原生值 ──
+      // 扫描方式：枚举两套样式表里所有 .dig-* 选择器，取同名属性不同值且属于布局属性的项。
+      // 以下每条右侧都是 dsh-ide-git 自己的值，绘画插件只是在这个容器里被"盖回去"。
+      "[class*=\"dig-conversation-seat\"] .dig-search{flex:0 0 auto!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-select-wrap{display:inline-flex!important;position:static!important;width:auto!important;max-width:90%!important;flex:0 1 auto!important;min-width:0!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-select{padding-right:6px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-icon-btn{width:24px!important;height:24px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-toast{padding:6px 8px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-tab{padding:2px 10px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-pick-list{max-height:300px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-pick-row{padding-top:4px!important;padding-bottom:4px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-badge{padding-left:5px!important;padding-right:5px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-empty{padding:14px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-textarea{padding:5px 6px!important;min-height:50px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-btn{padding:3px 10px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-overlay{position:absolute!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-menu-item{padding-top:4px!important;padding-bottom:4px!important}" +
+      // ── 第二批：绘画插件对 git 独有的"单边污染"（git 没声明、它声明了）──
+      // 这些属性 git 原本走默认值，被它改写后会造成布局走样，这里逐一归位。
+      "[class*=\"dig-conversation-seat\"] .dig-toast{position:static!important;left:auto!important;bottom:auto!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-tab{height:auto!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-btn{height:auto!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-menu-item{min-height:0!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-menu-label{padding:0!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-pick-list{padding:0!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-pick-row{min-height:0!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-select{display:inline-block!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-empty{display:block!important;grid-column:auto!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-busy{display:inline!important;flex-direction:row!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-settings{height:auto!important;min-height:0!important;overflow:visible!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-settings-list{width:auto!important;flex:0 1 auto!important}" +
+      // ── 第三批：跨选择器的污染（绘画用 `.dig-x .dig-y` / 元素选择器命中 git）──
+      "[class*=\"dig-conversation-seat\"] .dig-input{height:auto!important;padding:4px 6px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-search .dig-input{padding-left:6px!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-card{position:static!important;overflow:visible!important}" +
+      "[class*=\"dig-conversation-seat\"] .dig-menu button{min-height:0!important}"
+      // ═══════════════════════════════════════════════════════════════════
+      // 【插件冲突修复 · 结束 · 以上整块可删】
+      // ═══════════════════════════════════════════════════════════════════
+      : "") +
+      ".dst_archToggleInline{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);cursor:pointer;user-select:none;white-space:nowrap}" +
       // 会话行收紧：行高 32→21、圆角 12→8。胶囊背景就是行本身（选中/悬停时行背景），
       // 所以行矮了胶囊跟着矮，不会出现"背景比内容大一圈"。
       // 内容行高 20px，21px 只留 0.5px 上下余量——再往下会切字。
@@ -499,12 +570,28 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     var noticePair = React.useState(null);
     var notice = noticePair[0];
     var setNotice = noticePair[1];
+    // 兼容修复开关（dsh-ide-git × 绘画插件）：真实值存在 host 的 compat.json
+    var dedigPair = React.useState(dedigEnabled);
+    var dedig = dedigPair[0];
+    var setDedig = dedigPair[1];
+    var toggleDedig = function (next) {
+      setDedig(next);
+      dedigEnabled = next;
+      installStyles(true);
+      wireCall("sessionTools", "setCompat", { enabled: next }).catch(function () { /* 写失败只影响下次启动 */ });
+    };
     var reloadSizes = function () {
       wireCall("sessionTools", "getSessionSizes", {}).then(function (map) {
         if (map && typeof map === "object") setSizes(map);
       }).catch(function () { /* 拿不到大小不影响其它功能 */ });
     };
-    React.useEffect(function () { installStyles(); reloadSizes(); }, []);
+    React.useEffect(function () {
+      installStyles();
+      reloadSizes();
+      wireCall("sessionTools", "getCompat", {}).then(function (value) {
+        setDedig(!(value && value.dedig === false));
+      }).catch(function () { /* 读失败保留默认开 */ });
+    }, []);
     var byId = sessions.byId || {};
     var items = workspaces.items || [];
     var archivedSet = new Set(workspaces.archivedSessionIds || []);
@@ -650,7 +737,16 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
             (0, react_jsx_runtime.jsx)(_primitives.IconFolderOpenOutlineRegular, { size: 14 }),
             (0, react_jsx_runtime.jsx)("span", { children: t("openSessionsDir") })
           ]
-        })
+        }),
+        // 兼容修复开关：紧挨「打开会话目录」按钮
+        (0, react_jsx_runtime.jsxs)("label", { className: "dst_archToggleInline", children: [
+          (0, react_jsx_runtime.jsx)("input", {
+            type: "checkbox",
+            checked: dedig === true,
+            onChange: function (event) { toggleDedig(event.target.checked === true); }
+          }),
+          (0, react_jsx_runtime.jsx)("span", { children: t("compatDedig") })
+        ] })
       ] }),
       (0, react_jsx_runtime.jsx)("p", { className: "dst_archDesc", children: t("archDesc") }),
       (0, react_jsx_runtime.jsxs)("div", { className: "dst_archTabs", children: [
@@ -915,6 +1011,14 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       return ctx.locale.register(NS, { zh: zh, en: en });
     }, "dsh-session-tools: dictionaries");
     ctx.effect(installStyles, "dsh-session-tools: styles");
+    // 兼容开关：启动时读 host 的 compat.json；关闭时重建样式（不再输出 .dig-* 覆盖）
+    wireCall("sessionTools", "getCompat", {}).then(function (value) {
+      var on = !(value && value.dedig === false);
+      if (on !== dedigEnabled) {
+        dedigEnabled = on;
+        installStyles(true);
+      }
+    }).catch(function () { /* 读失败保持默认开 */ });
 
     var deleteRequest = void 0;
     var batchOpen = void 0;

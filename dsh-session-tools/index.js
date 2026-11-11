@@ -18,7 +18,26 @@ import { addStrictCodecFactories } from "./typert-compat.js";
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { sessionDir } from "@deepseek-ai/dsh-spill-local";
+
+var MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+// 界面兼容开关：{ dedig: true } —— 是否输出 dsh-ide-git × 绘画插件 的冲突修复 CSS
+var COMPAT_FILE = join(MODULE_DIR, "compat.json");
+function readCompat() {
+	try {
+		var raw = JSON.parse(readFileSync(COMPAT_FILE, "utf8"));
+		if (raw && typeof raw === "object" && typeof raw.dedig === "boolean") return { dedig: raw.dedig };
+	} catch (e) { /* 文件不存在或损坏 → 默认开 */ }
+	return { dedig: true };
+}
+function writeCompat(map) {
+	try {
+		mkdirSync(MODULE_DIR, { recursive: true });
+		writeFileSync(COMPAT_FILE, JSON.stringify({ dedig: map.dedig === true }));
+	} catch (e) { /* 写失败保留内存态 */ }
+}
 
 var looseSchema = { parse: function (v) { return v; } };
 var SESSION_TOOLS_INVOCATIONS = [
@@ -30,6 +49,29 @@ var SESSION_TOOLS_INVOCATIONS = [
 		invocation: { kind: "direct" },
 		parameters: [{ name: "sessionId", wire: "sessionId", source: "json", codec: { mode: "strict", typeSymbol: "dsh-session-tools/types#SessionId", schema: looseSchema } }],
 		result: { mode: "strict", typeSymbol: "dsh-session-tools/types#Deleted", schema: looseSchema },
+		sourceLocation: { file: "dsh-session-tools/index.js", line: 1, column: 1 }
+	},
+	{
+		// 界面兼容开关（dsh-ide-git × 绘画插件 的 CSS 冲突修复）
+		id: "dsh-session-tools#sessionTools/getCompat",
+		service: "session-tools-service",
+		namespace: "sessionTools",
+		method: "getCompat",
+		invocation: { kind: "direct" },
+		parameters: [],
+		result: { mode: "strict", typeSymbol: "dsh-session-tools/types#Compat", schema: looseSchema },
+		sourceLocation: { file: "dsh-session-tools/index.js", line: 1, column: 1 }
+	},
+	{
+		id: "dsh-session-tools#sessionTools/setCompat",
+		service: "session-tools-service",
+		namespace: "sessionTools",
+		method: "setCompat",
+		invocation: { kind: "direct" },
+		parameters: [
+			{ name: "enabled", wire: "enabled", source: "json", codec: { mode: "src-json" } }
+		],
+		result: { mode: "strict", typeSymbol: "dsh-session-tools/types#Compat", schema: looseSchema },
 		sourceLocation: { file: "dsh-session-tools/index.js", line: 1, column: 1 }
 	},
 	{
@@ -151,6 +193,19 @@ var SessionToolsService = class extends Service {
 			}
 		}
 		return { deleted: true };
+	}
+
+	/** 界面兼容开关（默认开）：{ dedig: boolean }。 */
+	getCompat() {
+		return readCompat();
+	}
+
+	/** 写入兼容开关，返回最新状态。 */
+	setCompat(enabled) {
+		var map = readCompat();
+		map.dedig = enabled === true;
+		writeCompat(map);
+		return map;
 	}
 
 	/** 会话存储根目录（绝对路径）：DSH_HOME 优先，否则 ~/.dsh/sessions。 */
