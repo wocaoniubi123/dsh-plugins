@@ -569,8 +569,22 @@ function nameEl(text, isUser) {
 	            hosts: Array.prototype.slice.call(container.querySelectorAll("[" + AV_MARK + "]"))
 	          });
 	        };
+	        // 整块挂载兜底：切会话 / 从插件页切回 时，整个会话树是一次性插入的，
+	        // 插入根在 flow 容器「之上」，containerFor 的 closest 找不到宿主 → 头像不注入，
+	        // 要等下一次站内变动（新消息、懒加载历史）才补上（用户实测：切回来头像区域空一段）。
+	        // 这里检测新增子树里有没有 flowItem，有就立刻同步补一次全量 scan：
+	        // MutationObserver 回调时 React 这一批提交已经落 DOM，同步扫能与消息同帧出图；
+	        // 靠 scanQueued 防重入（scan 注入头像会再触发 observer，但那批走的是廉价缓存校验）。
+	        var scanQueued = false;
+	        var queueScan = function () {
+	          if (scanQueued === true) return;
+	          scanQueued = true;
+	          try { scan(); } catch (e) { /* 忽略 */ }
+	          scanQueued = false;
+	        };
 	        var scanDirty = function (records) {
 	          var dirty = null;
+	          var needScan = false;
 	          for (var i = 0; i < records.length; i++) {
 	            var rec = records[i];
 	            // 只关心"元素级"结构变动：纯文本节点增删（流式 token）对头像没有任何影响，
@@ -596,10 +610,22 @@ function nameEl(text, isUser) {
 	                if (cont !== null) break;
 	              }
 	            }
-	            if (cont === null) continue;
+	            if (cont === null) {
+	              // 整块挂载：新增根在 flow 容器之上。看新增子树里有没有 flowItem，
+	              // 有就排队一次全量扫描（换页签 / 换会话 / 换工作区都会走这里）。
+	              if (needScan === false) {
+	                for (var a3 = 0; added !== null && a3 < added.length; a3++) {
+	                  var an = added[a3];
+	                  if (an.nodeType !== 1 || typeof an.querySelector !== "function") continue;
+	                  if (an.querySelector('[class*="flowItem"]') !== null) { needScan = true; break; }
+	                }
+	              }
+	              continue;
+	            }
 	            if (dirty === null) dirty = [];
 	            if (dirty.indexOf(cont) === -1) dirty.push(cont);
 	          }
+	          if (needScan === true) queueScan();
 	          if (dirty !== null) {
 	            for (var d = 0; d < dirty.length; d++) {
 	              rememberContainer(dirty[d]);
