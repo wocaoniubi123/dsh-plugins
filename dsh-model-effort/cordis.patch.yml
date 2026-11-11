@@ -1,0 +1,4 @@
+# dsh-model-effort（独立插件）补丁层
+- insert:
+    - id: dsh-model-effort
+      name: 'dsh-model-effort'

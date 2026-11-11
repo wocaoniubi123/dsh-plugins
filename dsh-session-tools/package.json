@@ -1,0 +1,35 @@
+{
+  "name": "dsh-session-tools",
+  "version": "1.0.0",
+  "description": "DSH 独立插件：会话批量管理（侧栏批量面板：批量归档/批量删除）+ 会话右键删除（确认弹窗「删除⏎」）",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-typert-registry": ">=0.1.0-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-spill-local": ">=0.1.0-rc.5 <0.3.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,31 @@
+{
+  "name": "dsh-skill-mcp-manager",
+  "version": "1.0.0",
+  "description": "DSH 独立插件：技能文件与 MCP 服务器管理（侧栏「插件」下面的入口 + 分组面板）",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-typert-registry": ">=0.1.0-rc.5 <0.3.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,4 @@
+# dsh-subagent-model-pill（独立插件）补丁层
+- insert:
+    - id: dsh-subagent-model-pill
+      name: 'dsh-subagent-model-pill'

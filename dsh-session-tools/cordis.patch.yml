@@ -1,0 +1,4 @@
+# dsh-session-tools（独立插件）补丁层
+- insert:
+    - id: dsh-session-tools
+      name: 'dsh-session-tools'

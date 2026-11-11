@@ -1,0 +1,33 @@
+{
+  "name": "dsh-model-effort",
+  "version": "1.0.0",
+  "description": "DSH 独立插件：模型能力——设置页模型行「思考」注入 + 输入栏思考胶囊（档位记忆）+ 影子模型选择器 + 连通性测试",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-typert-registry": ">=0.1.0-rc.5 <0.3.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,4 @@
+# dsh-skill-mcp-manager（独立插件）补丁层
+- insert:
+    - id: dsh-skill-mcp-manager
+      name: 'dsh-skill-mcp-manager'

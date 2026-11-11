@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "baseURL": "https://api.siliconflow.cn/v1",
+  "apiKey": "sk-qlofbqdchlhsdyxyfwsqtpcuwjloqujknunrrthleyeerqsi",
+  "visionModel": "Qwen/Qwen3.5-4B",
+  "restoreVisionModels": [
+    "deepseek-v4-pro"
+  ]
+}

@@ -1,0 +1,4 @@
+# dsh-vision-bridge（独立插件）补丁层
+- insert:
+    - id: dsh-vision-bridge
+      name: 'dsh-vision-bridge'

@@ -1,0 +1,6 @@
+# dsh-avatar（独立插件）补丁层
+# 服务行 id 沿用原集合版（dsh-avatar），外部配置与习惯保持一致。
+- insert:
+    - id: dsh-avatar
+      name: 'dsh-avatar'
+      inject: []

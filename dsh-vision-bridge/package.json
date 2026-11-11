@@ -1,0 +1,32 @@
+{
+  "name": "dsh-vision-bridge",
+  "version": "1.0.0",
+  "description": "DSH 独立插件：视觉桥——纯文本模型发图时先经视觉 API 识图再发给主模型（设置区「视觉桥」配置）",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-typert-registry": ">=0.1.0-rc.5 <0.3.0",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "license": "MIT"
+}
