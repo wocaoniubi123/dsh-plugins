@@ -251,6 +251,13 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       ".dst_headerActions:not([class*=\"headerActionsHidden\"]){max-width:none;overflow:visible}" +
       // 置顶钉子改红：官方置顶 marker 的 svg 用 currentColor 填充，覆盖容器 color 即可（class 通配绕开 hash 前缀）
       "[class*=\"_pinIndicator\"]{color:#f25a5a}" +
+      // 隐藏侧栏顶部品牌标识（logo + deepseek 字标 + HARNESS 徽标），保留左侧折叠按钮。
+      // 用 class 子串匹配绕开 CSS module 的 hash 前缀。
+      "[class*=\"brandIdentity\"]{display:none!important}" +
+      // 品牌按钮隐藏后 logoRow 只剩折叠按钮（它本身定位在标题栏区域），
+      // 行高直接收成 0，避免「新会话」上方留一条空白带。
+      "button[class*=\"_brand\"]{display:none!important}" +
+      "[class*=\"logoRow\"]{height:0!important;min-height:0!important;overflow:visible!important}" +
       // 会话行收紧：行高 32→21、圆角 12→8。胶囊背景就是行本身（选中/悬停时行背景），
       // 所以行矮了胶囊跟着矮，不会出现"背景比内容大一圈"。
       // 内容行高 20px，21px 只留 0.5px 上下余量——再往下会切字。
