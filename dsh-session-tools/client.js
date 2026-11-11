@@ -47,10 +47,18 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     selectSession: "选择会话“{name}”",
     close: "关闭",
     cancel: "取消",
-    archNav: "已归档",
-    archTitle: "已归档会话",
-    archDesc: "归档只是把会话从侧栏收起来（官方定位：暂存区，取消归档后才能打开）。这里可以按工作区查看、批量恢复或永久删除。",
-    archEmpty: "没有已归档会话",
+    archNav: "会话管理",
+    archTitle: "会话管理",
+    openSessionsDir: "打开会话目录",
+    openSessionsDirFailed: "打开目录失败: ",
+    archDesc: "按工作区查看全部会话或已归档会话；全部会话只能归档，已归档可以恢复或永久删除。",
+    tabAll: "全部会话",
+    tabArchived: "已归档",
+    archEmpty: "没有可显示的会话",
+    archArchive: "归档",
+    archArchiveSelected: "归档所选",
+    grpExpand: "展开分组",
+    grpCollapse: "收起分组",
     archSearch: "按标题筛选…",
     archRestore: "取消归档",
     archDelete: "删除",
@@ -100,10 +108,18 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     selectSession: "Select session \"{name}\"",
     close: "Close",
     cancel: "Cancel",
-    archNav: "Archived",
-    archTitle: "Archived sessions",
-    archDesc: "Archiving hides a session from the sidebar (the archive is a holding area: unarchive before opening). Review by workspace, restore in bulk, or delete permanently.",
-    archEmpty: "No archived sessions",
+    archNav: "Session manager",
+    archTitle: "Session manager",
+    openSessionsDir: "Open sessions folder",
+    openSessionsDirFailed: "Could not open folder: ",
+    archDesc: "Browse all sessions or archived sessions by workspace. The all-sessions view can only archive; archived sessions can be restored or deleted permanently.",
+    tabAll: "All sessions",
+    tabArchived: "Archived",
+    archEmpty: "No sessions to show",
+    archArchive: "Archive",
+    archArchiveSelected: "Archive selected",
+    grpExpand: "Expand group",
+    grpCollapse: "Collapse group",
     archSearch: "Filter by title…",
     archRestore: "Unarchive",
     archDelete: "Delete",
@@ -203,11 +219,25 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       ".dst_batchRowTime{color:var(--dsw-alias-label-caption);flex:none;font-size:10px;line-height:16px}" +
       ".dst_batchPin{width:16px;height:20px;color:#f25a5a;flex:none;display:inline-flex;align-items:center;justify-content:center;margin-left:6px}" +
       ".dst_batchEmpty,.dst_batchNotice{margin-top:8px;font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
-      ".dst_archTitle{margin:0 0 12px;font-size:20px;font-weight:650;letter-spacing:-.2px}" +
+      ".dst_archHead{display:flex;align-items:center;gap:12px;margin:0 0 12px}" +
+      ".dst_archTitle{margin:0;font-size:20px;font-weight:650;letter-spacing:-.2px}" +
+      ".dst_archDirBtn{cursor:pointer;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-elevated-fill);color:var(--dsw-alias-label-primary);border-radius:8px;padding:4px 10px;font:inherit;font-size:12px}" +
+      ".dst_archDirBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}" +
+      ".dst_archDirBtn:disabled{opacity:.5;cursor:default}" +
       ".dst_archDesc{margin:0 0 16px;max-width:46em;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}" +
       ".dst_archSearch{box-sizing:border-box;width:min(100%,320px);height:30px;padding:0 10px;margin-bottom:14px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-button-elevated-fill));border:1px solid var(--dsw-alias-border-l2);border-radius:8px;font:inherit;font-size:13px;outline:0}" +
       ".dst_archGroup{margin-bottom:16px}" +
-      ".dst_archGroupTitle{font-size:12px;color:var(--dsw-alias-label-tertiary);margin-bottom:6px}" +
+      ".dst_archTabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px}" +
+      ".dst_archTab{cursor:pointer;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-tertiary);border-radius:6px;padding:3px 10px;font:inherit;font-size:13px}" +
+      ".dst_archTab:hover{color:var(--dsw-alias-label-primary)}" +
+      ".dst_archTabActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-button-elevated-fill));border-color:var(--dsw-alias-border-l2)}" +
+      ".dst_archGroupTitle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-tertiary);margin-bottom:6px}" +
+      ".dst_archCaret{cursor:pointer;border:none;background:transparent;color:inherit;font:inherit;width:16px;height:16px;padding:0;line-height:1;display:inline-flex;align-items:center;justify-content:center}" +
+      ".dst_archGroupName{cursor:pointer;border:none;background:transparent;color:inherit;font:inherit;font-size:12px;padding:0;text-align:left}" +
+      ".dst_archGroupName:hover{color:var(--dsw-alias-label-primary)}" +
+      ".dst_archGroupCheck{cursor:pointer;flex:none;margin:0}" +
+      ".dst_archGroupCount{font-size:11px;color:var(--dsw-alias-label-caption);font-variant-numeric:tabular-nums}" +
+      ".dst_archRowMeta{flex:none;font-size:11px;color:var(--dsw-alias-label-caption);font-variant-numeric:tabular-nums;white-space:nowrap}" +
       ".dst_archRow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}" +
       ".dst_archRowTitle{min-width:0;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       ".dst_archRowActions{display:inline-flex;align-items:center;gap:8px;flex:none}" +
@@ -221,9 +251,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       ".dst_headerActions:not([class*=\"headerActionsHidden\"]){max-width:none;overflow:visible}" +
       // 置顶钉子改红：官方置顶 marker 的 svg 用 currentColor 填充，覆盖容器 color 即可（class 通配绕开 hash 前缀）
       "[class*=\"_pinIndicator\"]{color:#f25a5a}" +
-      // 会话行收紧：行高 32→27、圆角 12→10。胶囊背景就是行本身（选中/悬停时行背景），
+      // 会话行收紧：行高 32→21、圆角 12→8。胶囊背景就是行本身（选中/悬停时行背景），
       // 所以行矮了胶囊跟着矮，不会出现"背景比内容大一圈"。
-      "div[data-row-key^=\"session:\"]{height:27px!important;border-radius:10px!important}";
+      // 内容行高 20px，21px 只留 0.5px 上下余量——再往下会切字。
+      "div[data-row-key^=\"session:\"]{height:21px!important;border-radius:8px!important}";
     document.head.appendChild(tag);
   }
 
@@ -402,42 +433,84 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     });
   }
 
-  // ── 设置区「已归档」（settings.section，order 105 → 排在「视觉桥」之上）──
-  // 官方只有侧栏「视图选项 → 显示已归档 / 仅显示已归档」这个筛选，没有归档管理页：
-  // 这里按工作区分组列出已归档会话，支持筛选、单条/批量取消归档、单条/批量删除。
+  // 会话行的更新时间与体积文案：时间按本地时区 MM-DD HH:mm，体积按 MB（一位小数）。
+  function formatStamp(ms) {
+    if (typeof ms !== "number" || !isFinite(ms) || ms <= 0) return "--";
+    var d = new Date(ms);
+    var p = function (n) { return n < 10 ? "0" + n : String(n); };
+    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+  function formatSizeMb(bytes) {
+    if (typeof bytes !== "number" || !isFinite(bytes) || bytes <= 0) return "--";
+    var mb = bytes / (1024 * 1024);
+    if (mb < 0.05) return "<0.1MB";
+    return mb.toFixed(1) + "MB";
+  }
+
+  // ── 设置区「会话管理」（settings.section，order 105）──
+  // 两个视图共用一套分组渲染：
+  //   · 全部会话：按工作区分组，行内只给「归档」
+  //   · 已归档：按工作区分组，行内给「取消归档 / 删除」
+  // 工作区名点击 = 全选该组（再点取消），左侧箭头折叠分组。
+  // 每行前面显示「MM-DD HH:mm · 体积MB」，体积走 host RPC（sessionPersistence.list 的 sizeBytes）。
   function ArchivedSection(props) {
     var t = props.t;
     var sessions = props.useSessions(function (state) { return state; });
     var workspaces = props.useWorkspaces(function (state) { return state; });
+    var viewPair = React.useState("all");
+    var view = viewPair[0];
+    var setView = viewPair[1];
     var queryPair = React.useState("");
     var query = queryPair[0];
     var setQuery = queryPair[1];
     var selectedPair = React.useState(function () { return new Set(); });
     var selected = selectedPair[0];
     var setSelected = selectedPair[1];
+    var collapsedPair = React.useState(function () { return new Set(); });
+    var collapsed = collapsedPair[0];
+    var setCollapsed = collapsedPair[1];
+    var sizesPair = React.useState({});
+    var sizes = sizesPair[0];
+    var setSizes = sizesPair[1];
     var busyPair = React.useState(false);
     var busy = busyPair[0];
     var setBusy = busyPair[1];
     var noticePair = React.useState(null);
     var notice = noticePair[0];
     var setNotice = noticePair[1];
-    React.useEffect(function () { installStyles(); }, []);
+    var reloadSizes = function () {
+      wireCall("sessionTools", "getSessionSizes", {}).then(function (map) {
+        if (map && typeof map === "object") setSizes(map);
+      }).catch(function () { /* 拿不到大小不影响其它功能 */ });
+    };
+    React.useEffect(function () { installStyles(); reloadSizes(); }, []);
     var byId = sessions.byId || {};
     var items = workspaces.items || [];
+    var archivedSet = new Set(workspaces.archivedSessionIds || []);
     var workspaceOf = function (sessionId) {
       for (var i = 0; i < items.length; i++) {
         if ((items[i].sessionIds || []).indexOf(sessionId) !== -1) return items[i];
       }
       return void 0;
     };
+    var needle = query.toLowerCase();
     var rows = [];
-    (workspaces.archivedSessionIds || []).forEach(function (sessionId) {
+    var seen = new Set();
+    var push = function (sessionId, workspace) {
+      if (seen.has(sessionId)) return;
       var summary = byId[sessionId];
-      if (summary === void 0) return; // 悬空 id（会话已被删）不列
-      var title = summary.blank === true ? t("newSession") : (summary.title || summary.displayTitle || sessionId);
-      if (query.length > 0 && title.toLowerCase().indexOf(query.toLowerCase()) === -1) return;
-      rows.push({ id: sessionId, title: title, updatedAt: summary.updatedAt || 0, workspace: workspaceOf(sessionId) });
+      if (summary === void 0 || summary === null || summary.blank === true) return;
+      var isArchived = archivedSet.has(sessionId);
+      if (view === "archived" ? !isArchived : isArchived) return;
+      var title = summary.title || summary.displayTitle || sessionId;
+      if (needle.length > 0 && title.toLowerCase().indexOf(needle) === -1) return;
+      seen.add(sessionId);
+      rows.push({ id: sessionId, title: title, updatedAt: summary.updatedAt || 0, workspace: workspace });
+    };
+    items.forEach(function (workspace) {
+      (workspace.sessionIds || []).forEach(function (sessionId) { push(sessionId, workspace); });
     });
+    (sessions.ids || []).forEach(function (sessionId) { push(sessionId, workspaceOf(sessionId)); });
     var order = [];
     var table = new Map();
     rows.forEach(function (row) {
@@ -468,6 +541,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       return action(sessionIds).then(function (result) {
         setNotice(t("result", { ok: result.ok, fail: result.fail }));
         setSelected(new Set());
+        reloadSizes();
       }).finally(function () { setBusy(false); });
     };
     var toggle = function (sessionId) {
@@ -476,9 +550,92 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       else next.add(sessionId);
       setSelected(next);
     };
+    var toggleGroup = function (group) {
+      var allIn = group.rows.every(function (row) { return selected.has(row.id); });
+      var next = new Set(selected);
+      group.rows.forEach(function (row) {
+        if (allIn) next.delete(row.id);
+        else next.add(row.id);
+      });
+      setSelected(next);
+    };
+    var toggleCollapse = function (key) {
+      var next = new Set(collapsed);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      setCollapsed(next);
+    };
+    var switchView = function (next) {
+      if (next === view) return;
+      setView(next);
+      setSelected(new Set());
+      setNotice(null);
+    };
+    // 打开会话目录：host 返回会话存储根目录，客户端交给官方 remote.session 打开
+    var openSessionDir = function () {
+      setNotice(null);
+      wireCall("sessionTools", "getSessionsRoot", {}).then(function (root) {
+        if (typeof root !== "string" || root.length === 0) throw new Error("sessions root unavailable");
+        return props.openSessionsDir(root);
+      }).catch(function (reason) {
+        setNotice(t("openSessionsDirFailed") + String((reason && reason.message) || reason));
+      });
+    };
+    var tab = function (id, label) {
+      return (0, react_jsx_runtime.jsx)("button", {
+        type: "button",
+        className: "dst_archTab" + (view === id ? " dst_archTabActive" : ""),
+        "aria-pressed": view === id,
+        onClick: function () { switchView(id); },
+        children: label
+      }, id);
+    };
+    var rowActions = function (row) {
+      if (view === "archived") {
+        return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+          (0, react_jsx_runtime.jsx)("button", {
+            type: "button",
+            className: "dst_archAction",
+            disabled: busy,
+            onClick: function () { runAction(props.restoreSessions, [row.id]); },
+            children: t("archRestore")
+          }),
+          (0, react_jsx_runtime.jsx)("button", {
+            type: "button",
+            className: "dst_archAction dst_archActionDanger",
+            disabled: busy,
+            onClick: function () { props.requestDelete([row.id]); },
+            children: t("archDelete")
+          })
+        ] });
+      }
+      return (0, react_jsx_runtime.jsx)("button", {
+        type: "button",
+        className: "dst_archAction",
+        disabled: busy,
+        onClick: function () { runAction(props.archiveSessions, [row.id]); },
+        children: t("archArchive")
+      });
+    };
     return (0, react_jsx_runtime.jsxs)("div", { children: [
-      (0, react_jsx_runtime.jsx)("h2", { className: "dst_archTitle", children: t("archTitle") }),
+      (0, react_jsx_runtime.jsxs)("div", { className: "dst_archHead", children: [
+        (0, react_jsx_runtime.jsx)("h2", { className: "dst_archTitle", children: t("archTitle") }),
+        (0, react_jsx_runtime.jsxs)("button", {
+          type: "button",
+          className: "dst_archDirBtn",
+          disabled: busy,
+          onClick: openSessionDir,
+          children: [
+            (0, react_jsx_runtime.jsx)(_primitives.IconFolderOpenOutlineRegular, { size: 14 }),
+            (0, react_jsx_runtime.jsx)("span", { children: t("openSessionsDir") })
+          ]
+        })
+      ] }),
       (0, react_jsx_runtime.jsx)("p", { className: "dst_archDesc", children: t("archDesc") }),
+      (0, react_jsx_runtime.jsxs)("div", { className: "dst_archTabs", children: [
+        tab("all", t("tabAll")),
+        tab("archived", t("tabArchived"))
+      ] }),
       (0, react_jsx_runtime.jsx)("input", {
         className: "dst_archSearch",
         type: "text",
@@ -495,29 +652,70 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
           onClick: function () { setSelected(new Set(allSelected ? [] : visible)); },
           children: t(allSelected ? "clearAll" : "selectAll")
         }),
-        (0, react_jsx_runtime.jsx)("button", {
-          type: "button",
-          className: "dst_archAction",
-          disabled: busy || picked.length === 0,
-          onClick: function () { runAction(props.restoreSessions, picked); },
-          children: t("archRestoreSelected")
-        }),
-        (0, react_jsx_runtime.jsx)("button", {
-          type: "button",
-          className: "dst_archAction dst_archActionDanger",
-          disabled: busy || picked.length === 0,
-          onClick: function () { props.requestDelete(picked); },
-          children: t("archDeleteSelected")
-        }),
+        view === "archived"
+          ? (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+            (0, react_jsx_runtime.jsx)("button", {
+              type: "button",
+              className: "dst_archAction",
+              disabled: busy || picked.length === 0,
+              onClick: function () { runAction(props.restoreSessions, picked); },
+              children: t("archRestoreSelected")
+            }),
+            (0, react_jsx_runtime.jsx)("button", {
+              type: "button",
+              className: "dst_archAction dst_archActionDanger",
+              disabled: busy || picked.length === 0,
+              onClick: function () { props.requestDelete(picked); },
+              children: t("archDeleteSelected")
+            })
+          ] })
+          : (0, react_jsx_runtime.jsx)("button", {
+            type: "button",
+            className: "dst_archAction",
+            disabled: busy || picked.length === 0,
+            onClick: function () { runAction(props.archiveSessions, picked); },
+            children: t("archArchiveSelected")
+          }),
         busy && (0, react_jsx_runtime.jsx)("span", { className: "dst_archMeta", children: t("pending") }),
         notice !== null && (0, react_jsx_runtime.jsx)("span", { className: "dst_archMeta", role: "status", children: notice })
       ] }),
       rows.length === 0
         ? (0, react_jsx_runtime.jsx)("div", { className: "dst_batchEmpty", children: t("archEmpty") })
         : groups.map(function (group) {
+          var isCollapsed = collapsed.has(group.key);
+          var allIn = group.rows.length > 0 && group.rows.every(function (row) { return selected.has(row.id); });
+          var someIn = group.rows.some(function (row) { return selected.has(row.id); });
           return (0, react_jsx_runtime.jsxs)("div", { className: "dst_archGroup", children: [
-            (0, react_jsx_runtime.jsx)("div", { className: "dst_archGroupTitle", children: group.label }),
-            group.rows.map(function (row) {
+            (0, react_jsx_runtime.jsxs)("div", { className: "dst_archGroupTitle", children: [
+              (0, react_jsx_runtime.jsx)("input", {
+                type: "checkbox",
+                className: "dst_archGroupCheck",
+                checked: allIn,
+                disabled: busy || group.rows.length === 0,
+                "aria-label": t("selectAll"),
+                ref: function (el) { if (el !== null && el !== void 0) el.indeterminate = someIn && !allIn; },
+                onChange: function () { toggleGroup(group); }
+              }),
+              (0, react_jsx_runtime.jsx)("button", {
+                type: "button",
+                className: "dst_archCaret",
+                disabled: busy,
+                "aria-label": isCollapsed ? t("grpExpand") : t("grpCollapse"),
+                "aria-expanded": !isCollapsed,
+                onClick: function () { toggleCollapse(group.key); },
+                children: (0, react_jsx_runtime.jsx)(isCollapsed ? _primitives.IconChevronRightOutlineRegular : _primitives.IconChevronDownOutlineRegular, { size: 12 })
+              }),
+              (0, react_jsx_runtime.jsx)("button", {
+                type: "button",
+                className: "dst_archGroupName",
+                disabled: busy,
+                title: isCollapsed ? t("grpExpand") : t("grpCollapse"),
+                onClick: function () { toggleCollapse(group.key); },
+                children: group.label
+              }),
+              (0, react_jsx_runtime.jsx)("span", { className: "dst_archGroupCount", children: "(" + group.rows.length + ")" })
+            ] }),
+            isCollapsed ? null : group.rows.map(function (row) {
               return (0, react_jsx_runtime.jsxs)("div", { className: "dst_archRow", children: [
                 (0, react_jsx_runtime.jsx)("input", {
                   type: "checkbox",
@@ -526,23 +724,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
                   "aria-label": t("selectSession", { name: row.title }),
                   onChange: function () { toggle(row.id); }
                 }),
+                (0, react_jsx_runtime.jsx)("span", { className: "dst_archRowMeta", children: formatStamp(row.updatedAt) + " · " + formatSizeMb(sizes[row.id]) }),
                 (0, react_jsx_runtime.jsx)("span", { className: "dst_archRowTitle", title: row.title, children: row.title }),
-                (0, react_jsx_runtime.jsxs)("span", { className: "dst_archRowActions", children: [
-                  (0, react_jsx_runtime.jsx)("button", {
-                    type: "button",
-                    className: "dst_archAction",
-                    disabled: busy,
-                    onClick: function () { runAction(props.restoreSessions, [row.id]); },
-                    children: t("archRestore")
-                  }),
-                  (0, react_jsx_runtime.jsx)("button", {
-                    type: "button",
-                    className: "dst_archAction dst_archActionDanger",
-                    disabled: busy,
-                    onClick: function () { props.requestDelete([row.id]); },
-                    children: t("archDelete")
-                  })
-                ] })
+                (0, react_jsx_runtime.jsx)("span", { className: "dst_archRowActions", children: rowActions(row) })
               ] }, row.id);
             })
           ] }, group.key);
@@ -966,6 +1150,16 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
             return {
               hooks: { sessions: ctx.sessions.list, workspaces: ctx.workspaces.list },
               restoreSessions: restoreMany,
+              archiveSessions: archiveMany,
+              // 打开会话存储目录：openWorkspacePath 不传 action = 直接打开该目录本身
+              //（传 action:"reveal" 会退到上一级、只选中该文件夹，用户实测不要这个）
+              openSessionsDir: function (path) {
+                var remoteSession = ctx.get("remote.session");
+                if (remoteSession === void 0 || typeof remoteSession.openWorkspacePath !== "function") {
+                  return Promise.reject(new Error("remote.session.openWorkspacePath unavailable"));
+                }
+                return remoteSession.openWorkspacePath({ path: path });
+              },
               requestDelete: requestDelete
             };
           }

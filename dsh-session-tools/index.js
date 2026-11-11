@@ -16,7 +16,8 @@ import { Service } from "@deepseek-ai/cordis";
 import { bindTypertRemote } from "@deepseek-ai/dsh-typert-protocol";
 import { addStrictCodecFactories } from "./typert-compat.js";
 import { rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { sessionDir } from "@deepseek-ai/dsh-spill-local";
 
 var looseSchema = { parse: function (v) { return v; } };
@@ -29,6 +30,29 @@ var SESSION_TOOLS_INVOCATIONS = [
 		invocation: { kind: "direct" },
 		parameters: [{ name: "sessionId", wire: "sessionId", source: "json", codec: { mode: "strict", typeSymbol: "dsh-session-tools/types#SessionId", schema: looseSchema } }],
 		result: { mode: "strict", typeSymbol: "dsh-session-tools/types#Deleted", schema: looseSchema },
+		sourceLocation: { file: "dsh-session-tools/index.js", line: 1, column: 1 }
+	},
+	{
+		// 会话存储根目录：会话管理面板「打开会话目录」用。
+		id: "dsh-session-tools#sessionTools/getSessionsRoot",
+		service: "session-tools-service",
+		namespace: "sessionTools",
+		method: "getSessionsRoot",
+		invocation: { kind: "direct" },
+		parameters: [],
+		result: { mode: "strict", typeSymbol: "dsh-session-tools/types#SessionsRoot", schema: looseSchema },
+		sourceLocation: { file: "dsh-session-tools/index.js", line: 1, column: 1 }
+	},
+	{
+		// 会话大小（字节）：会话管理面板要显示每条会话的 MB 占用。
+		// 数据来自 sessionPersistence.list() 的快照 sizeBytes（官方契约：最高 generation 的日志文件大小）。
+		id: "dsh-session-tools#sessionTools/getSessionSizes",
+		service: "session-tools-service",
+		namespace: "sessionTools",
+		method: "getSessionSizes",
+		invocation: { kind: "direct" },
+		parameters: [],
+		result: { mode: "strict", typeSymbol: "dsh-session-tools/types#SessionSizes", schema: looseSchema },
 		sourceLocation: { file: "dsh-session-tools/index.js", line: 1, column: 1 }
 	}
 ];
@@ -127,6 +151,43 @@ var SessionToolsService = class extends Service {
 			}
 		}
 		return { deleted: true };
+	}
+
+	/** 会话存储根目录（绝对路径）：DSH_HOME 优先，否则 ~/.dsh/sessions。 */
+	getSessionsRoot() {
+		try {
+			var home = process.env.DSH_HOME;
+			if (typeof home === "string" && home.length > 0) return join(home, "sessions");
+			return join(homedir(), ".dsh", "sessions");
+		} catch (error) {
+			this.warn("sessions root resolve failed: " + String(error));
+			return "";
+		}
+	}
+
+	/**
+	 * 全量会话大小表：{ "<sessionId>": <bytes> }。
+	 * 只读 sessionPersistence.list() 的快照（不读事件行、不触发迁移）。
+	 * 拿不到 sizeBytes 的条目返回 0，客户端显示为 "--"。
+	 */
+	async getSessionSizes() {
+		var out = {};
+		try {
+			var persistence = this.ctx.get("sessionPersistence");
+			if (persistence === void 0 || typeof persistence.list !== "function") return out;
+			var list = await persistence.list();
+			for (var i = 0; i < list.length; i++) {
+				var entry = list[i];
+				if (entry === void 0 || entry === null) continue;
+				var header = entry.header !== void 0 && entry.header !== null ? entry.header : entry;
+				var id = header !== void 0 && header !== null ? header.id : void 0;
+				if (typeof id !== "string" || id.length === 0) continue;
+				out[id] = typeof entry.sizeBytes === "number" && isFinite(entry.sizeBytes) ? entry.sizeBytes : 0;
+			}
+		} catch (error) {
+			this.warn("session size probe failed: " + String(error));
+		}
+		return out;
 	}
 
 	/** 广播一个"已存但未挂载"会话的移除（冷会话删除路径）。 */
