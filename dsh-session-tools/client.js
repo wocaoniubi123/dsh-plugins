@@ -220,7 +220,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       // 只在「可见态」放开 max-width，隐藏态（官方 headerActionsHidden）保持原样。
       ".dst_headerActions:not([class*=\"headerActionsHidden\"]){max-width:none;overflow:visible}" +
       // 置顶钉子改红：官方置顶 marker 的 svg 用 currentColor 填充，覆盖容器 color 即可（class 通配绕开 hash 前缀）
-      "[class*=\"_pinIndicator\"]{color:#f25a5a}";
+      "[class*=\"_pinIndicator\"]{color:#f25a5a}" +
+      // 会话行收紧：行高 32→27、圆角 12→10。胶囊背景就是行本身（选中/悬停时行背景），
+      // 所以行矮了胶囊跟着矮，不会出现"背景比内容大一圈"。
+      "div[data-row-key^=\"session:\"]{height:27px!important;border-radius:10px!important}";
     document.head.appendChild(tag);
   }
 
