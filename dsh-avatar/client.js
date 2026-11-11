@@ -417,13 +417,22 @@ function nameEl(text, isUser) {
 	    function ensureWideObserver() {
 	      try {
 	        var t = wideTarget();
-	        if (t === null || wideObservedEl === t.el) return;
+	        if (t === null) return;
+	        if (wideObservedEl === t.el) return;
 	        if (wideObserver !== null) wideObserver.disconnect();
 	        wideObservedEl = t.el;
 	        wideObserver = new MutationObserver(function () {
 	          if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) applyWideChatLock();
 	        });
 	        wideObserver.observe(t.el, { attributes: true, attributeFilter: ["style"] });
+	        // 挂到新元素后立刻锁一次：切页签回来/窗口刚放大时，官方可能还没写列宽，
+	        // 所以下一帧再补一次（否则要等官方或消息渲染改 style 才跟随，用户实测「慢半拍」）。
+	        if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) {
+	          applyWideChatLock();
+	          requestAnimationFrame(function () {
+	            if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) applyWideChatLock();
+	          });
+	        }
 	      } catch (e) { /* 忽略 */ }
 	    }
 
@@ -492,6 +501,19 @@ function nameEl(text, isUser) {
           try { document.execCommand("insertLineBreak"); } catch (e2) { /* 插入失败不阻塞输入 */ }
         }
       }, true);
+      // 窗口尺寸变化：官方在 resize 时重写 --dsh-conversation-column-width（可能带节流，
+      // 也可能在页面切回来时才补写）。这里下一帧 + 140ms 各锁一次，保证「放大窗口 → 立刻铺满」，
+      // 不用等下一次消息渲染（用户实测：原来要等窗口里有输出才跟随）。
+      window.addEventListener("resize", function () {
+        if (cfg === null || cfg === void 0 || cfg.wideChat !== true) return;
+        requestAnimationFrame(function () {
+          ensureWideObserver();
+          applyWideChatLock();
+        });
+        setTimeout(function () {
+          if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) applyWideChatLock();
+        }, 140);
+      });
       loadConfig().then(function () {
 	        applySizeVar();
 	        // ── 增量扫描 ──────────────────────────────────────────
@@ -586,7 +608,10 @@ function nameEl(text, isUser) {
 	          }
 	          // 设置页图标：只在弹窗存在时才可能命中（内部有幂等短路）
 	          if (document.querySelector('[role="dialog"]') !== null) patchNavIcon();
-	          if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) ensureWideObserver();
+	          if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) {
+	            ensureWideObserver();
+	            applyWideChatLock();
+	          }
 	        };
 	        // 低频对账：纯缓存校验（不读布局），兜住任何漏网的边界情况
 	        setInterval(function () {
