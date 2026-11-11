@@ -258,6 +258,20 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       // 行高直接收成 0，避免「新会话」上方留一条空白带。
       "button[class*=\"_brand\"]{display:none!important}" +
       "[class*=\"logoRow\"]{height:0!important;min-height:0!important;overflow:visible!important}" +
+      // 侧栏导航改成两列：容器由竖向 flex 改成横向换行，每个条目占一半宽
+      //（胶囊背景随宽度缩短），行高 36→32、间距 2→4。
+      "[class*=\"panelList\"]{flex-direction:row!important;flex-wrap:wrap!important;gap:2px!important;height:auto!important}" +
+      "[class*=\"panelList\"] > *{flex:1 1 calc(50% - 1px)!important;max-width:calc(50% - 1px)!important;min-width:0!important}" +
+      "[class*=\"panelList\"] [class*=\"panelRow\"]{height:28px!important;min-height:28px!important;padding:4px 8px!important;box-sizing:border-box!important}" +
+      "[class*=\"panelList\"] [class*=\"panelRow\"] span{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}" +
+      // 底部：账号行占左侧，远程控制挪到右侧同一行（原先是上下两行）
+      "[class*=\"footArea\"]{flex-direction:row!important;align-items:center!important;gap:8px!important}" +
+      "[class*=\"footArea\"] > [class*=\"footerActions\"]{order:2!important;flex:0 0 auto!important;width:auto!important;min-width:0!important}" +
+      "[class*=\"footArea\"] > [class*=\"footerActions\"] > div{width:auto!important;height:auto!important}" +
+      "[class*=\"footArea\"] > [class*=\"settingsArea\"]{order:1!important;flex:1 1 auto!important;width:auto!important;min-width:0!important}" +
+      "[class*=\"footerActions\"] button{width:auto!important;height:28px!important;min-height:28px!important;padding:0 8px!important;box-sizing:border-box!important}" +
+      // 账号胶囊跟着缩：宽度按内容（头像+昵称），高度与导航行一致（28px），不再拉满整行
+      "[class*=\"settingsArea\"] button{width:auto!important;height:28px!important;min-height:28px!important;padding:0 8px!important;border-radius:8px!important;box-sizing:border-box!important}" +
       // 会话行收紧：行高 32→21、圆角 12→8。胶囊背景就是行本身（选中/悬停时行背景），
       // 所以行矮了胶囊跟着矮，不会出现"背景比内容大一圈"。
       // 内容行高 20px，21px 只留 0.5px 上下余量——再往下会切字。
