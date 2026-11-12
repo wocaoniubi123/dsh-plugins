@@ -484,7 +484,13 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
       if (!isProviderEnabled(group.id)) return;
       var subs = (group.models || []).map(function (model) {
         var isSel = current && current.provider === group.id && current.model === model.id;
-        return { id: group.id + ":" + model.id, label: (isSel ? "✅ " : "") + (model.name || model.id) };
+        // ✅ 放进 Menu 原生的图标槽（.itemIcon，固定 14px）：选中项填 ✅，未选中项填空串占位，
+        // 这样整列模型名都从同一 x 起排（此前只有选中项带「✅ 」文字前缀，其他行左移，看着歪）。
+        // ✅ 压到 12px 行内盒，避免 emoji 撑破 14px 槽位把选中行再挤歪。
+        var tick = isSel
+          ? react_jsx_runtime.jsx("span", { style: { fontSize: "12px", lineHeight: "1" }, children: "✅" })
+          : "";
+        return { id: group.id + ":" + model.id, label: model.name || model.id, icon: tick };
       });
       var snap = injectorScope ? injectorScope.getSnapshot() : null;
       var prov = snap && snap.value && snap.value.providers && snap.value.providers[group.id];
