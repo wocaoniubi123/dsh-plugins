@@ -287,8 +287,11 @@ function nameEl(text, isUser) {
 	      for (var u = 0; u < plan.length; u++) {
 	        var uu = plan[u];
 	        if (uu.kind === "flow" && uu.user) {
-	          if (!uu.el.querySelector("[" + AV_MARK + "]")) injectAvatar(uu.el, true);
-	          else shiftForAvatar(uu.el, true);
+	          var existAv = uu.el.querySelector("[" + AV_MARK + "]");
+	          if (existAv === null) injectAvatar(uu.el, true);
+	          // 头像可能已经挂在内部 userRow 上（发送瞬间的裸行被复用进 flowItem）：
+	          // 那种情况让位缩进已经写在 userRow 上，这里再补一次就是双倍边距。
+	          else if (existAv.parentElement === uu.el) shiftForAvatar(uu.el, true);
 	        } else if (uu.kind === "flow" && uu.tech !== null) {
 	          // 技术条目（系统提示词/上下文注入）：不插头像、不改显隐
 	          shiftForAvatar(uu.el, false);
@@ -582,6 +585,30 @@ function nameEl(text, isUser) {
 	          try { scan(); } catch (e) { /* 忽略 */ }
 	          scanQueued = false;
 	        };
+	        // 新用户消息的直通补头像：认「用户行」本身，不依赖容器分类/缓存。
+	        // 发送时 DSH 先往 flow 槽里插一个裸 userRow（还没有 flowItem 包裹），
+	        // 之后才换成 flowItem；这两步都可能被容器签名缓存/分组判断跳过，
+	        // 结果要等 2s 对账才补头像（用户实测：发出去第一眼是原生气泡）。
+	        // 注意：不要在这里顺手处理 turn-process（AI 状态行）——
+	        // 那类节点会被分组逻辑反复 remove/注入，和本回调形成死循环，主线程会被打死。
+	        var ensureRowAvatar = function (node) {
+	          try {
+	            if (node === null || node === void 0 || node.nodeType !== 1) return;
+	            var row = null;
+	            var kind = typeof node.getAttribute === "function" ? node.getAttribute("data-chat-flow-kind") : null;
+	            if (kind === "user") row = node;
+	            // 发送瞬间 DSH 先往 flow 槽里插一个「裸 userRow」（还没有 flowItem 包裹），
+	            // 这一帧就是用户看到的原生气泡。这里直接按类名认行并补头像/昵称。
+	            else if (typeof node.matches === "function" && node.matches('[class*="userRow"]')) row = node;
+	            else if (typeof node.closest === "function") {
+	              row = node.closest('[data-chat-flow-kind="user"]');
+	              if (row === null || row === void 0) row = node.closest('[class*="userRow"]');
+	            }
+	            if (row === null || row === void 0) return;
+	            if (row.querySelector("[" + AV_MARK + "]") !== null) return;
+	            injectAvatar(row, true);
+	          } catch (e) { /* 补头像失败不影响其余 */ }
+	        };
 	        var scanDirty = function (records) {
 	          var dirty = null;
 	          var needScan = false;
@@ -602,6 +629,13 @@ function nameEl(text, isUser) {
 	              }
 	            }
 	            if (!structural) continue;
+	            // 新发出的用户消息：直接补头像，不依赖容器分类/缓存。
+	            // 裸 userRow / flowItem 两步插入都走这里；React 之后重渲染抹掉的，
+	            // 下一批 mutation 会再补一次。
+	            if (cfg !== null && cfg !== void 0) {
+	              ensureRowAvatar(rec.target);
+	              for (var fa = 0; added !== null && fa < added.length; fa++) ensureRowAvatar(added[fa]);
+	            }
 	            var cont = containerFor(rec.target);
 	            if (cont === null) {
 	              for (var a = 0; added !== null && a < added.length; a++) {
