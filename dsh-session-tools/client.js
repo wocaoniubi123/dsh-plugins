@@ -52,6 +52,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     openSessionsDir: "打开会话目录",
     openSessionsDirFailed: "打开目录失败: ",
     compatDedig: "修复 Git 页签与绘画插件的样式冲突",
+    sidebarButton: "侧边栏按钮",
+    navEntry: "会话管理",
     archDesc: "按工作区查看全部会话或已归档会话；全部会话只能归档，已归档可以恢复或永久删除。",
     tabAll: "全部会话",
     tabArchived: "已归档",
@@ -114,6 +116,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     openSessionsDir: "Open sessions folder",
     openSessionsDirFailed: "Could not open folder: ",
     compatDedig: "Fix Git tab styles clashing with the image-gen plugin",
+    sidebarButton: "Sidebar button",
+    navEntry: "Session manager",
     archDesc: "Browse all sessions or archived sessions by workspace. The all-sessions view can only archive; archived sessions can be restored or deleted permanently.",
     tabAll: "All sessions",
     tabArchived: "Archived",
@@ -240,14 +244,120 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     markPanelNav();
     var mo = new MutationObserver(function () {
       if (document.querySelector("nav[" + NAV_MARK + "]") === null) markPanelNav();
+      ensureSidebarEntry();
     });
     mo.observe(document.body, { childList: true, subtree: true });
     // 兜底：侧栏折叠/展开只改样式不产生结构变动，observer 收不到，低频补打一次。
-    var timer = setInterval(markPanelNav, 2500);
+    var timer = setInterval(function () {
+      markPanelNav();
+      ensureSidebarEntry();
+    }, 2500);
     return function () {
       mo.disconnect();
       clearInterval(timer);
     };
+  }
+
+  // ── 侧栏「会话管理」入口 ─────────────────────────────────────────────
+  // 勾选后往侧栏导航插一枚自己的按钮（纯 DOM，不依赖官方类名）。
+  // 点击 = 打开设置并切到本插件注册的「会话管理」分页。
+  // 定位链：侧栏账号入口 data-slot="sidebar.settings"（官方插槽，稳定）
+  //        → 菜单项「设置 / Settings」→ 设置壳内的同名分页按钮。
+  var SIDEBAR_ENTRY_MARK = "data-dst-session-entry";
+  var sidebarBtnEnabled = false;
+  // 文案走 apply 里绑定的 t：字典是 apply 中后注册的，这里不能提前取值（会拿到裸 key）。
+  var sidebarEntryLabelFn = null;
+  function sidebarEntryLabelText() {
+    try {
+      return sidebarEntryLabelFn === null ? "会话管理" : sidebarEntryLabelFn();
+    } catch (e) { return "会话管理"; }
+  }
+
+  function lastDialogEl() {
+    var dialogs = document.querySelectorAll('[role="dialog"]');
+    return dialogs.length === 0 ? null : dialogs[dialogs.length - 1];
+  }
+  function findSectionButton() {
+    var dialog = lastDialogEl();
+    if (dialog === null) return null;
+    var btns = dialog.querySelectorAll("button");
+    for (var i = 0; i < btns.length; i++) {
+      var text = (btns[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (text === "会话管理" || text === "Session manager") return btns[i];
+    }
+    return null;
+  }
+  function openSessionManager() {
+    var section = findSectionButton();
+    if (section !== null) { section.click(); return; }
+    // 设置没开：点账号入口打开菜单，再点「设置」，最后等设置壳渲染出来点分页。
+    var host = document.querySelector('[data-slot="sidebar.settings"]');
+    var trigger = host === null ? null : host.querySelector("button");
+    if (trigger === null) return;
+    trigger.click();
+    var tries = 0;
+    var tick = function () {
+      tries++;
+      var target = findSectionButton();
+      if (target !== null) { target.click(); return; }
+      var menu = document.querySelectorAll('[role="menuitem"]');
+      for (var i = 0; i < menu.length; i++) {
+        var text = (menu[i].textContent || "").replace(/\s+/g, " ").trim();
+        if (/^(设置|Settings)/.test(text)) { menu[i].click(); break; }
+      }
+      if (tries < 40) setTimeout(tick, 50);
+    };
+    setTimeout(tick, 150);
+  }
+  function ensureSidebarEntry() {
+    try {
+      if (typeof document === "undefined") return;
+      var existing = document.querySelector("[" + SIDEBAR_ENTRY_MARK + "]");
+      if (sidebarBtnEnabled !== true) {
+        if (existing !== null) existing.remove();
+        return;
+      }
+      var nav = document.querySelector("nav[" + NAV_MARK + "]");
+      if (nav === null) return;
+      var text = sidebarEntryLabelText();
+      // 入口排在「更多」前面（用户要求）；找不到「更多」就追加到末尾。
+      var moreEntry = null;
+      for (var i = 0; i < nav.children.length; i++) {
+        var childText = (nav.children[i].textContent || "").replace(/\s+/g, " ").trim();
+        if (/^(更多|More)$/.test(childText)) { moreEntry = nav.children[i]; break; }
+      }
+      if (existing !== null && existing.parentElement === nav) {
+        // 语言切换/字典晚注册时只更新文案，不重建节点（避免抢焦点）
+        if (existing.getAttribute("data-dst-label") !== text) {
+          existing.setAttribute("data-dst-label", text);
+          existing.title = text;
+          var old = existing.querySelector(".dst_navEntryLabel");
+          if (old !== null) old.textContent = text;
+        }
+        // React 重排后位置可能变，这里把入口顶回「更多」前面（幂等）
+        if (moreEntry !== null && existing.nextElementSibling !== moreEntry) {
+          nav.insertBefore(existing, moreEntry);
+        }
+        return;
+      }
+      if (existing !== null) existing.remove();
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "dst_navEntry";
+      btn.setAttribute(SIDEBAR_ENTRY_MARK, "");
+      btn.setAttribute("data-dst-label", text);
+      btn.title = text;
+      var icon = document.createElement("span");
+      icon.className = "dst_navEntryIcon";
+      icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>';
+      var label = document.createElement("span");
+      label.className = "dst_navEntryLabel";
+      label.textContent = text;
+      btn.appendChild(icon);
+      btn.appendChild(label);
+      btn.addEventListener("click", openSessionManager);
+      nav.insertBefore(btn, moreEntry);
+    } catch (e) { /* 注入失败不影响其它功能 */ }
   }
 
   function installStyles(force) {
@@ -270,7 +380,11 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       ".dst_batchRowTime{color:var(--dsw-alias-label-caption);flex:none;font-size:10px;line-height:16px}" +
       ".dst_batchPin{width:16px;height:20px;color:#f25a5a;flex:none;display:inline-flex;align-items:center;justify-content:center;margin-left:6px}" +
       ".dst_batchEmpty,.dst_batchNotice{margin-top:8px;font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
-      ".dst_archHead{display:flex;align-items:center;gap:12px;margin:0 0 12px}" +
+      // 标题行强制单行：标题与「打开会话目录」不缩，两个勾选框排在右边；
+      // 空间不够时只让勾选框文字省略，不换行（用户要求两个开关同一行）。
+      ".dst_archHead{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;margin:0 0 12px}" +
+      ".dst_archTitle{flex:none}" +
+      ".dst_archDirBtn{flex:none}" +
       ".dst_archTitle{margin:0;font-size:20px;font-weight:650;letter-spacing:-.2px}" +
       ".dst_archDirBtn{cursor:pointer;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-elevated-fill);color:var(--dsw-alias-label-primary);border-radius:8px;padding:4px 10px;font:inherit;font-size:12px}" +
       ".dst_archDirBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}" +
@@ -326,6 +440,11 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       "[data-dst-nav] > *{box-sizing:border-box!important;flex:1 1 calc(50% - 1px)!important;max-width:calc(50% - 1px)!important;min-width:0!important}" +
       "[data-dst-nav] button{height:28px!important;min-height:28px!important;padding:4px 8px!important;box-sizing:border-box!important}" +
       "[data-dst-nav] button span{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}" +
+      // 侧栏「会话管理」入口（勾选后由 JS 插入，纯 DOM 节点，不吃官方类名）
+      ".dst_navEntry{display:flex;align-items:center;gap:6px;width:100%;height:28px;padding:4px 8px;box-sizing:border-box;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;cursor:pointer;text-align:left;min-width:0}" +
+      ".dst_navEntry:hover{background:var(--dsw-alias-interactive-bg-hover)}" +
+      ".dst_navEntryIcon{display:inline-flex;flex:none;width:16px;height:16px;align-items:center;justify-content:center}" +
+      ".dst_navEntryLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       // 底部：账号行占左侧，远程控制挪到右侧同一行（原先是上下两行）
       "[class*=\"footArea\"]{flex-direction:row!important;align-items:center!important;gap:8px!important}" +
       "[class*=\"footArea\"] > [class*=\"footerActions\"]{order:2!important;flex:0 0 auto!important;width:auto!important;min-width:0!important}" +
@@ -397,7 +516,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       // 【插件冲突修复 · 结束 · 以上整块可删】
       // ═══════════════════════════════════════════════════════════════════
       : "") +
-      ".dst_archToggleInline{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);cursor:pointer;user-select:none;white-space:nowrap}" +
+      ".dst_archToggleInline{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);cursor:pointer;user-select:none;white-space:nowrap;min-width:0}" +
+      ".dst_archToggleInline > span{min-width:0;overflow:hidden;text-overflow:ellipsis}" +
       // 会话行收紧：行高 32→21、圆角 12→8。胶囊背景就是行本身（选中/悬停时行背景），
       // 所以行矮了胶囊跟着矮，不会出现"背景比内容大一圈"。
       // 内容行高 20px，21px 只留 0.5px 上下余量——再往下会切字。
@@ -635,6 +755,16 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       installStyles(true);
       wireCall("sessionTools", "setCompat", { enabled: next }).catch(function () { /* 写失败只影响下次启动 */ });
     };
+    // 侧栏入口开关：勾选后主界面侧栏出现「会话管理」按钮
+    var sidebarPair = React.useState(sidebarBtnEnabled);
+    var sidebarOn = sidebarPair[0];
+    var setSidebarOn = sidebarPair[1];
+    var toggleSidebar = function (next) {
+      setSidebarOn(next);
+      sidebarBtnEnabled = next;
+      ensureSidebarEntry();
+      wireCall("sessionTools", "setSidebarButton", { enabled: next }).catch(function () { /* 写失败只影响下次启动 */ });
+    };
     var reloadSizes = function () {
       wireCall("sessionTools", "getSessionSizes", {}).then(function (map) {
         if (map && typeof map === "object") setSizes(map);
@@ -645,6 +775,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       reloadSizes();
       wireCall("sessionTools", "getCompat", {}).then(function (value) {
         setDedig(!(value && value.dedig === false));
+        setSidebarOn(value !== null && value !== void 0 && value.sidebarButton === true);
       }).catch(function () { /* 读失败保留默认开 */ });
     }, []);
     var byId = sessions.byId || {};
@@ -801,6 +932,15 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
             onChange: function (event) { toggleDedig(event.target.checked === true); }
           }),
           (0, react_jsx_runtime.jsx)("span", { children: t("compatDedig") })
+        ] }),
+        // 侧栏入口开关：勾选后主界面侧栏出现「会话管理」按钮，点它直接跳到本页
+        (0, react_jsx_runtime.jsxs)("label", { className: "dst_archToggleInline", children: [
+          (0, react_jsx_runtime.jsx)("input", {
+            type: "checkbox",
+            checked: sidebarOn === true,
+            onChange: function (event) { toggleSidebar(event.target.checked === true); }
+          }),
+          (0, react_jsx_runtime.jsx)("span", { children: t("sidebarButton") })
         ] })
       ] }),
       (0, react_jsx_runtime.jsx)("p", { className: "dst_archDesc", children: t("archDesc") }),
@@ -1065,6 +1205,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     ctx.effect(function () {
       return ctx.locale.register(NS, { zh: zh, en: en });
     }, "dsh-session-tools: dictionaries");
+    // 字典注册之后再取文案（提前取会拿到裸 key）
+    sidebarEntryLabelFn = function () { return t("navEntry"); };
     ctx.effect(installStyles, "dsh-session-tools: styles");
     ctx.effect(watchPanelNav, "dsh-session-tools: sidebar nav anchor");
     // 兼容开关：启动时读 host 的 compat.json；关闭时重建样式（不再输出 .dig-* 覆盖）
@@ -1074,6 +1216,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
         dedigEnabled = on;
         installStyles(true);
       }
+      sidebarBtnEnabled = value !== null && value !== void 0 && value.sidebarButton === true;
+      ensureSidebarEntry();
     }).catch(function () { /* 读失败保持默认开 */ });
 
     var deleteRequest = void 0;

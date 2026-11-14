@@ -24,18 +24,24 @@ import { sessionDir } from "@deepseek-ai/dsh-spill-local";
 
 var MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 // 界面兼容开关：{ dedig: true } —— 是否输出 dsh-ide-git × 绘画插件 的冲突修复 CSS
+// 侧栏入口开关：{ sidebarButton: false } —— 是否在主界面侧栏显示「会话管理」按钮
 var COMPAT_FILE = join(MODULE_DIR, "compat.json");
 function readCompat() {
 	try {
 		var raw = JSON.parse(readFileSync(COMPAT_FILE, "utf8"));
-		if (raw && typeof raw === "object" && typeof raw.dedig === "boolean") return { dedig: raw.dedig };
-	} catch (e) { /* 文件不存在或损坏 → 默认开 */ }
-	return { dedig: true };
+		if (raw && typeof raw === "object") {
+			return {
+				dedig: typeof raw.dedig === "boolean" ? raw.dedig : true,
+				sidebarButton: raw.sidebarButton === true
+			};
+		}
+	} catch (e) { /* 文件不存在或损坏 → 默认值 */ }
+	return { dedig: true, sidebarButton: false };
 }
 function writeCompat(map) {
 	try {
 		mkdirSync(MODULE_DIR, { recursive: true });
-		writeFileSync(COMPAT_FILE, JSON.stringify({ dedig: map.dedig === true }));
+		writeFileSync(COMPAT_FILE, JSON.stringify({ dedig: map.dedig === true, sidebarButton: map.sidebarButton === true }));
 	} catch (e) { /* 写失败保留内存态 */ }
 }
 
@@ -67,6 +73,19 @@ var SESSION_TOOLS_INVOCATIONS = [
 		service: "session-tools-service",
 		namespace: "sessionTools",
 		method: "setCompat",
+		invocation: { kind: "direct" },
+		parameters: [
+			{ name: "enabled", wire: "enabled", source: "json", codec: { mode: "src-json" } }
+		],
+		result: { mode: "strict", typeSymbol: "dsh-session-tools/types#Compat", schema: looseSchema },
+		sourceLocation: { file: "dsh-session-tools/index.js", line: 1, column: 1 }
+	},
+	{
+		// 侧栏入口开关：主界面侧栏是否显示「会话管理」按钮
+		id: "dsh-session-tools#sessionTools/setSidebarButton",
+		service: "session-tools-service",
+		namespace: "sessionTools",
+		method: "setSidebarButton",
 		invocation: { kind: "direct" },
 		parameters: [
 			{ name: "enabled", wire: "enabled", source: "json", codec: { mode: "src-json" } }
@@ -204,6 +223,14 @@ var SessionToolsService = class extends Service {
 	setCompat(enabled) {
 		var map = readCompat();
 		map.dedig = enabled === true;
+		writeCompat(map);
+		return map;
+	}
+
+	/** 写入「侧栏显示会话管理按钮」开关，返回最新状态。 */
+	setSidebarButton(enabled) {
+		var map = readCompat();
+		map.sidebarButton = enabled === true;
 		writeCompat(map);
 		return map;
 	}
