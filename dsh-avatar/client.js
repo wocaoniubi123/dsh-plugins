@@ -31,6 +31,11 @@ window.__ModuleLoader__.load({
     // Ctrl/Cmd+Enter 派发「普通 Enter」合成事件时置 true，防本监听器自己再拦一次。
     var injectingEnter = false;
     var BUBBLE_CSS_MARK = "data-ziyong-avatar-bubblecss";
+    // 主界面「资源管理器」按钮：勾选后插到标题栏「更多操作 ...」按钮左边
+    var EXPLORER_KEY = "dsh-avatar/explorer-button";
+    var explorerEnabled = false;
+    var explorerBtnEl = null;
+    var pluginCtx = null;
 
     function avatarSize() {
       var n = cfg && typeof cfg.avatarSize === "number" ? cfg.avatarSize : 40;
@@ -532,6 +537,118 @@ function nameEl(text, isUser) {
 	      } catch (e) { /* 图标补丁失败不影响设置区 */ }
 	    }
 
+	    // ── 主界面「资源管理器」按钮 ────────────────────────────
+	    // 勾选后插在标题栏「更多操作（...）」按钮的左边，点击打开当前工作区目录。
+	    // 目录解析顺序：当前选中会话的 workspaceId → 该工作区 path → 会话 cwd → 第一个工作区。
+	    function explorerFlag() {
+	      try { return localStorage.getItem(EXPLORER_KEY) === "1"; } catch (e) { return false; }
+	    }
+	    function setExplorerFlag(on) {
+	      explorerEnabled = on === true;
+	      try { localStorage.setItem(EXPLORER_KEY, explorerEnabled ? "1" : "0"); } catch (e) { /* 忽略 */ }
+	      syncExplorerButton();
+	    }
+	    function activeSessionId() {
+	      try {
+	        var row = document.querySelector('[data-row-key^="session:"][aria-selected="true"]');
+	        if (row !== null) return String(row.getAttribute("data-row-key")).slice("session:".length);
+	        // 兜底：窗口标题 = "<会话标题> — DeepSeek Harness"
+	        var t = String(document.title || "").split(" — ")[0].trim();
+	        if (t.length > 0) {
+	          var rows = document.querySelectorAll('[data-row-key^="session:"]');
+	          for (var i = 0; i < rows.length; i++) {
+	            var txt = (rows[i].textContent || "").replace(/\s+/g, " ").trim();
+	            if (txt.indexOf(t) === 0) return String(rows[i].getAttribute("data-row-key")).slice("session:".length);
+	          }
+	        }
+	      } catch (e) { /* 忽略 */ }
+	      return "";
+	    }
+	    function resolveWorkspacePath() {
+	      var ctx = pluginCtx;
+	      if (ctx === null) return null;
+	      try {
+	        var items = [];
+	        try {
+	          var snap = ctx.workspaces.list.getSnapshot();
+	          items = snap !== null && snap !== void 0 && Array.isArray(snap.items) ? snap.items : [];
+	        } catch (e0) { items = []; }
+	        var sid = activeSessionId();
+	        var summary = null;
+	        try {
+	          var sm = ctx.sessions.list.getSnapshot();
+	          if (sid.length > 0 && sm !== null && sm !== void 0 && sm.byId !== void 0) summary = sm.byId[sid];
+	        } catch (e1) { summary = null; }
+	        if (summary !== null && summary !== void 0) {
+	          if (typeof summary.workspaceId === "string" && summary.workspaceId.length > 0) {
+	            for (var i = 0; i < items.length; i++) {
+	              if (items[i] !== null && items[i] !== void 0 && items[i].workspaceId === summary.workspaceId && typeof items[i].path === "string" && items[i].path.length > 0) return items[i].path;
+	            }
+	          }
+	          if (typeof summary.cwd === "string" && summary.cwd.length > 0) return summary.cwd;
+	          if (typeof summary.workingDirectory === "string" && summary.workingDirectory.length > 0) return summary.workingDirectory;
+	        }
+	        for (var j = 0; j < items.length; j++) {
+	          if (items[j] !== null && items[j] !== void 0 && typeof items[j].path === "string" && items[j].path.length > 0) return items[j].path;
+	        }
+	      } catch (e2) { /* 忽略 */ }
+	      return null;
+	    }
+	    function openCurrentWorkspace() {
+	      var ctx = pluginCtx;
+	      if (ctx === null) return;
+	      var path = resolveWorkspacePath();
+	      if (path === null) return;
+	      try {
+	        var svc = ctx.get("remote.session");
+	        if (svc === void 0 || svc === null || typeof svc.openWorkspacePath !== "function") return;
+	        // 不传 action：直接打开该目录本身（与会话管理里「打开会话目录」一致）
+	        Promise.resolve(svc.openWorkspacePath({ path: path })).catch(function () { /* 忽略 */ });
+	      } catch (e3) { /* 忽略 */ }
+	    }
+	    function findMoreActionsButton() {
+	      try {
+	        var bs = document.querySelectorAll("button");
+	        for (var i = 0; i < bs.length; i++) {
+	          var label = (bs[i].getAttribute("aria-label") || bs[i].getAttribute("title") || "").trim();
+	          if (label === "更多操作" || label === "More actions") {
+	            var r = bs[i].getBoundingClientRect();
+	            if (r.width > 0) return bs[i];
+	          }
+	        }
+	      } catch (e) { /* 忽略 */ }
+	      return null;
+	    }
+	    function syncExplorerButton() {
+	      try {
+	        if (explorerEnabled !== true) {
+	          if (explorerBtnEl !== null && explorerBtnEl.isConnected === true) explorerBtnEl.remove();
+	          explorerBtnEl = null;
+	          return;
+	        }
+	        var more = findMoreActionsButton();
+	        if (more === null) return;
+	        var wrap = more.parentElement;
+	        if (wrap === null) return;
+	        if (explorerBtnEl === null || explorerBtnEl.isConnected !== true) {
+	          explorerBtnEl = document.createElement("button");
+	          explorerBtnEl.type = "button";
+	          explorerBtnEl.className = "zy_explorerBtn";
+	          explorerBtnEl.title = "资源管理器";
+	          explorerBtnEl.setAttribute("aria-label", "资源管理器");
+	          explorerBtnEl.textContent = "📂";
+	          explorerBtnEl.addEventListener("click", function (ev) {
+	            ev.preventDefault();
+	            ev.stopPropagation();
+	            openCurrentWorkspace();
+	          });
+	        }
+	        if (explorerBtnEl.parentElement !== wrap || explorerBtnEl.nextElementSibling !== more) {
+	          wrap.insertBefore(explorerBtnEl, more);
+	        }
+	      } catch (e) { /* 忽略 */ }
+	    }
+
 	    // 消息流头像的全局样式：**提前在场**，让「运行中」状态行的位置第一帧就是最终位置
 	    //（此前靠 JS 注入 flex 会先按官方默认位置渲染一帧再跳到底部，视觉上"跳一下"）
 	    function installFlowStyles() {
@@ -560,7 +677,10 @@ function nameEl(text, isUser) {
 	        "[data-zy-run]{display:flex;flex-direction:column;min-height:calc(var(--zy-size,40px) + 2px)}" +
 	        "[data-zy-run] [class*=\"runningContent\"]{margin-top:auto}" +
 	        // 用户消息气泡去掉背景（原内联样式改 CSS，React 重渲染也不丢）
-	        "[data-zy-av=\"user\"] [class*=\"bubble\"]{background:transparent!important;border:none!important;border-radius:0!important;padding:0!important}";
+	        "[data-zy-av=\"user\"] [class*=\"bubble\"]{background:transparent!important;border:none!important;border-radius:0!important;padding:0!important}" +
+	        // 主界面资源管理器图标按钮：尺寸/圆角与官方 ghost 小按钮一致
+	        ".zy_explorerBtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-size:15px;line-height:1;cursor:pointer;padding:0}" +
+	        ".zy_explorerBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}";
 	      document.head.appendChild(tag);
 	    }
 	    /** 头像尺寸写进 CSS 变量：只作「运行中状态行第一帧」的 min-height 兜底。
@@ -919,10 +1039,11 @@ function nameEl(text, isUser) {
 		              try { scanContainerCached(parent); rememberContainer(parent); } catch (e) { /* 该容器跳过 */ }
 		            }
 		          } catch (e) { /* 注入失败不拖垮页面 */ }
-		          patchNavIcon();
-		          if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) applyWideChatLock();
-		          ensureWideObserver();
-		        };
+	          patchNavIcon();
+	          syncExplorerButton();
+	          if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) applyWideChatLock();
+	          ensureWideObserver();
+	        };
 	        scan();
 	        new MutationObserver(scanDirty).observe(document.body, { childList: true, subtree: true });
 	        // ── 可见性驱动补挂（滚动 / IO 命中）────────────────────
@@ -998,6 +1119,7 @@ function nameEl(text, isUser) {
 	      uploadRejected: "图片过大或格式不支持（≤5MB，png/jpg/gif/webp/svg）",
 	      enterNewline: "Enter 回车换行（发送：Ctrl+Enter 或点发送按钮）",
 	      wideChat: "对话宽度跟随窗口（锁定为最大）",
+	      explorerButton: "主界面添加资源管理器",
 	      personaInject: "全局指令注入系统提示词",
 	      personaInjectOn: "已开启，新建会话立即生效",
 	      personaInjectOff: "已关闭",
@@ -1022,6 +1144,7 @@ function nameEl(text, isUser) {
 	      uploadRejected: "Image too large or unsupported (≤5MB, png/jpg/gif/webp/svg)",
 	      enterNewline: "Enter inserts a newline (send with Ctrl+Enter or the send button)",
 	      wideChat: "Chat width follows the window (locked to max)",
+	      explorerButton: "Explorer button on main UI",
 	      personaInject: "Inject global directives into the system prompt",
 	      personaInjectOn: "Enabled. Applies to new sessions immediately.",
 	      personaInjectOff: "Disabled",
@@ -1064,6 +1187,7 @@ function nameEl(text, isUser) {
 	      var [draft, setDraft] = react.useState({ userName: "", assistantName: "" });
 	      var [notice, setNotice] = react.useState("");
 	      var [busy, setBusy] = react.useState(false);
+	      var [explorerOn, setExplorerOn] = react.useState(explorerFlag());
 	      var userFile = react.useRef(null);
 	      var assistantFile = react.useRef(null);
 	      var adopt = react.useCallback(function (next) {
@@ -1294,6 +1418,19 @@ function nameEl(text, isUser) {
 	          }),
 	          (0, jsxRuntime.jsx)("span", { children: t("wideChat") })
 	        ] }),
+	        // 主界面「资源管理器」按钮：勾选后标题栏「更多操作 ...」左边出现 📂
+	        (0, jsxRuntime.jsxs)("label", { className: "dshav_toggle", style: { margin: "10px 0 6px" }, children: [
+	          (0, jsxRuntime.jsx)("input", {
+	            type: "checkbox",
+	            checked: explorerOn === true,
+	            onChange: function (ev) {
+	              var on = ev.target.checked === true;
+	              setExplorerOn(on);
+	              setExplorerFlag(on);
+	            }
+	          }),
+	          (0, jsxRuntime.jsx)("span", { children: t("explorerButton") })
+	        ] }),
 	        // 全局指令注入：把 ~/.dsh/AGENTS.md 挂进每个 agent 的系统提示词 section，
 	        // 每轮请求都带、压缩吃不掉。开关只写插件自己的 config.json，新建会话生效。
 	        (0, jsxRuntime.jsxs)("label", { className: "dshav_toggle", style: { margin: "10px 0 6px" }, children: [
@@ -1364,6 +1501,8 @@ function nameEl(text, isUser) {
 	    }
 
 	    function apply(ctx) {
+	      pluginCtx = ctx;
+	      explorerEnabled = explorerFlag();
 	      start();
 	      // 官方设置区槽位：与「通用设置/模型」同级，导航高亮与内容切换由设置壳管理。
 	      ctx.effect(function () {
@@ -1382,8 +1521,9 @@ function nameEl(text, isUser) {
 	    }
 
 	    exports.apply = apply
-	    // 严格注入：设置区需要 slots（注册槽位）与 locale（词条）
-	    exports.inject = ["slots", "locale"]
+	    // 严格注入：设置区需要 slots（注册槽位）与 locale（词条）；
+	    // 资源管理器按钮需要会话/工作区/远程服务
+	    exports.inject = ["slots", "locale", "sessions", "workspaces", "remote", "remote.session"]
 	    return module.exports
 
 	    return module.exports;
