@@ -179,24 +179,9 @@ function nameEl(text, isUser) {
 	      if (flowItem.getAttribute(HOST_ATTR) !== role) flowItem.setAttribute(HOST_ATTR, role);
 	      applyAvatarVars(flowItem, role);
 	      shiftForAvatar(flowItem, isUser);
-	      // AI 宿主可能是个 0 高度的包裹层（内容靠子节点撑）：记下「第一行可见内容」
-	      // 相对宿主顶部的偏移，昵称/头像按这个偏移贴上去，就不会和内容之间空一截。
-	      // 只在首次注入时量一次（锁定宿主，之后不再量）。
-	      if (role === "ai" && flowItem.style.getPropertyValue("--zy-dy") === "") {
-	        try {
-	          var hostRect = flowItem.getBoundingClientRect();
-	          var firstRect = null;
-	          var allKids = flowItem.querySelectorAll("*");
-	          for (var di = 0; di < allKids.length; di++) {
-	            var r0 = allKids[di].getBoundingClientRect();
-	            if (r0.height > 0) { firstRect = r0; break; }
-	          }
-	          if (firstRect !== null) {
-	            var dy = Math.round(firstRect.top - hostRect.top);
-	            if (dy > 0 && dy < 200) flowItem.style.setProperty("--zy-dy", dy + "px");
-	          }
-	        } catch (eDy) { /* 量不到就按 0 处理 */ }
-	      }
+	      // AI 宿主的内容可能直接是文本节点，也可能被 React 换成别的结构：
+	      // 一次性量「首个子元素偏移」会在结构变化后失真（实测昵称压到正文上）。
+	      // 统一规则：宿主自己留 16px 昵称带，伪元素固定贴在带内，内容始终在带下方。
 	      // 运行行宿主：撑到刚好容纳头像、状态行内容贴底（原内联样式改成属性 + CSS）
 	      if (flowItem.getAttribute(RUN_MARK) !== null && flowItem.getAttribute(RUN_ATTR) === null) {
 	        flowItem.setAttribute(RUN_ATTR, "");
@@ -243,6 +228,109 @@ function nameEl(text, isUser) {
 	    // 「宿主还没定下来」的容器重试计数：正文常以文本节点形式长出来，
 	    // 我们的 observer 只收元素级变动 → 不会重扫。这里补定时重试（最多 3 次）。
 	    var recheckLeft = new WeakMap();
+	    // ── 视口可见性：只挂屏幕附近的轮次 ──────────────────────────
+	    // 切会话时整段历史都在 DOM 里（100 轮很常见），旧实现每轮都读 innerText、
+	    // 量 rect、写属性 → 切一次几百毫秒。现在只处理视口 ±400px 预热带内的块：
+	    //   · seededLen ：容器子节点数（数量变化才重新二分定位可见区，避免反复量）
+	    //   · visSet    ：当前判定「在预热带内」的块；scanContainer 只处理含可见成员的组
+	    //   · visObserved / visIO：IntersectionObserver 兜底（折叠/展开、缩放、搜索定位）
+	    // 滚到哪挂到哪；离开视口不撤属性，滚回来零成本。
+	    var VIS_BUFFER = 400;
+	    var visSet = new WeakSet();
+	    var visObserved = new WeakSet();
+	    var visIO = null;
+	    var onVisibilityChange = null;
+	    function ensureVisObserver() {
+	      if (visIO !== null) return visIO;
+	      if (typeof IntersectionObserver !== "function") return null;
+	      try {
+	        visIO = new IntersectionObserver(function (entries) {
+	          var changed = false;
+	          for (var i = 0; i < entries.length; i++) {
+	            var en = entries[i];
+	            if (en.isIntersecting === true && !visSet.has(en.target)) {
+	              visSet.add(en.target);
+	              changed = true;
+	            }
+	          }
+	          if (changed === true && typeof onVisibilityChange === "function") onVisibilityChange();
+	        }, { root: null, rootMargin: VIS_BUFFER + "px 0px", threshold: 0 });
+	      } catch (e) {
+	        visIO = null;
+	      }
+	      return visIO;
+	    }
+	    function observeVis(el) {
+	      if (el === null || el === void 0 || el.nodeType !== 1) return;
+	      if (visObserved.has(el)) return;
+	      var io = ensureVisObserver();
+	      if (io === null) return;
+	      visObserved.add(el);
+	      try { io.observe(el); } catch (e) { /* 观察失败不影响注入 */ }
+	    }
+	    // 容器子节点是竖向有序的：二分找第一个「没完全滚出视口上方」的块（约 7 次读），
+	    // 再顺序补到视口下方边界（通常 2~4 块）→ 与历史长度解耦，100 轮也只读十几次。
+	    // 逐个块量 rect 的老写法在 120 轮容器上要 100+ 次，切会话时每次扫描都强制重排。
+	    var seededLen = new WeakMap();
+	    // 播种按帧合并：挂载期 React 每帧可能提交多次，scanContainer 也会跑多次；
+	    // 每帧只量一次可见区（rAF 在绘制前，头像仍与首帧同屏出现）。
+	    var seedScheduled = new WeakMap();
+	    function scheduleMarkVisible(container) {
+	      if (seedScheduled.get(container) === true) return;
+	      seedScheduled.set(container, true);
+	      requestAnimationFrame(function () {
+	        seedScheduled.set(container, false);
+	        try { markVisibleRange(container); } catch (eMark) { /* 忽略 */ }
+	        if (typeof onVisibilityChange === "function") onVisibilityChange();
+	      });
+	    }
+	    function markVisibleRange(container) {
+	      var ch = container.children;
+	      var n = ch.length;
+	      if (n === 0) return false;
+	      var vh = 0;
+	      try { vh = window.innerHeight || document.documentElement.clientHeight || 0; } catch (eVh) { vh = 0; }
+	      if (vh <= 0) vh = 800;
+	      var cr = null;
+	      try { cr = container.getBoundingClientRect(); } catch (eCr) { cr = null; }
+	      // 容器可能是 display:contents（新会话的 flow 槽实测高度 0），自身没有盒子。
+	      // 这时退回视口边界：子节点 rect 仍是视口坐标，二分照常有效。
+	      var topEdge;
+	      var bottomEdge;
+	      if (cr !== null && cr.height > 0) {
+	        topEdge = cr.top - VIS_BUFFER;
+	        bottomEdge = cr.bottom + VIS_BUFFER;
+	      } else {
+	        topEdge = -VIS_BUFFER;
+	        bottomEdge = vh + VIS_BUFFER;
+	      }
+	      var rectAt = function (i) {
+	        try { return ch[i].getBoundingClientRect(); } catch (e) { return null; }
+	      };
+	      var lo = 0;
+	      var hi = n - 1;
+	      var first = n;
+	      while (lo <= hi) {
+	        var mid = (lo + hi) >> 1;
+	        var mr = rectAt(mid);
+	        if (mr !== null && mr.bottom < topEdge) lo = mid + 1;
+	        else { first = mid; hi = mid - 1; }
+	      }
+	      var changed = false;
+	      for (var i = first; i < n; i++) {
+	        var rr = rectAt(i);
+	        if (rr === null) continue;
+	        if (rr.top > bottomEdge) break;
+	        var el = ch[i];
+	        if (rr.height > 0 && !visSet.has(el)) { visSet.add(el); changed = true; }
+	        // 盒子里的 flowItem 进屏了，盒子本身也要放行（分组是按盒子元素判的）
+	        if (typeof el.closest === "function") {
+	          var sbox = el.closest("[" + BOX_MARK + "]");
+	          if (sbox !== null && !visSet.has(sbox)) visSet.add(sbox);
+	        }
+	      }
+	      return changed;
+	    }
 	    function scheduleRecheck(container) {
 	      try {
 	        var n = recheckLeft.get(container) || 0;
@@ -287,6 +375,18 @@ function nameEl(text, isUser) {
 	        it.tech = it.user ? null : techKindOf(it.el);
 	      }
 
+	      // ── 1.5 可见性播种 ──
+	      // 子节点数量变化（新块出现 / 整段重建）才重新二分定位可见区；
+	      // 块高变化、折叠展开、缩放由 IntersectionObserver 兜底。
+	      // 每块都挂 IO 观察（只 observe，不读布局）；离开视口不撤属性，滚回来零成本。
+	      for (var sd = 0; sd < plan.length; sd++) observeVis(plan[sd].el);
+	      try {
+	        if (seededLen.get(container) !== plan.length) {
+	          seededLen.set(container, plan.length);
+	          scheduleMarkVisible(container);
+	        }
+	      } catch (eSeed) { /* 量不到就当屏外 */ }
+
 	      // ── 2. 不再在扫描里预读布局 ──
 	      // 旧实现在这里给每个候选块读 offsetHeight（一次强制重排），宿主挑完再写头像，
 	      // 写入又让布局失效 → 浏览器为绘制再排一次，等于每次挂载多付一次整页布局
@@ -313,25 +413,39 @@ function nameEl(text, isUser) {
 	      }
 	      for (var u = 0; u < plan.length; u++) {
 	        var uu = plan[u];
-	        if (uu.kind === "flow" && uu.user) {
-	          // 发送瞬间的裸行可能被复用进 flowItem：内部 userRow 已带头像就沿用它，
-	          // 否则在外层块上注入（避免同一消息挂两个头像/双倍边距）。
-	          var innerRow = uu.el.querySelector('[class*="userRow"]');
+		        if (uu.kind === "flow" && uu.user) {
+		          // 发送瞬间的裸行可能被复用进 flowItem：内部 userRow 已带头像就沿用它，
+		          // 否则在外层块上注入（避免同一消息挂两个头像/双倍边距）。
+		          var innerRow = uu.el.querySelector('[class*="userRow"]');
+		          // 屏外的用户消息本轮跳过：切会话只挂视口 ±400px 内的轮次，滚到再补
+		          if (!visSet.has(uu.el) && (innerRow === null || !visSet.has(innerRow))) continue;
 	          var userHost = uu.el.getAttribute(HOST_ATTR) !== null
 	            ? uu.el
 	            : (innerRow !== null && innerRow.getAttribute(HOST_ATTR) !== null ? innerRow : null);
 	          if (userHost === null) injectAvatar(uu.el, true);
-	          else shiftForAvatar(userHost, true);
-	        } else if (uu.kind === "flow" && uu.tech !== null) {
-	          // 技术条目（系统提示词/上下文注入）：不插头像、不改显隐
-	          shiftForAvatar(uu.el, false);
-	        }
+	          else {
+	            // 同一条消息只留一个宿主：外挂在就撤内挂，内挂在就撤外挂（防双头像/双缩进）
+	            if (userHost === uu.el && innerRow !== null && innerRow !== uu.el && innerRow.getAttribute(HOST_ATTR) !== null) removeAvatar(innerRow);
+	            if (userHost !== uu.el && uu.el.getAttribute(HOST_ATTR) !== null) removeAvatar(uu.el);
+	            shiftForAvatar(userHost, true);
+	          }
+		        } else if (uu.kind === "flow" && uu.tech !== null) {
+		          // 技术条目（系统提示词/上下文注入）：不插头像、不改显隐
+		          if (!visSet.has(uu.el)) continue;
+		          shiftForAvatar(uu.el, false);
+		        }
 	      }
 	      // 宿主定位：每轮只定位一次并锁定；**空块一律不挂**（没文字 = 用户看不见，
 	      // 挂上去就是「昵称悬空、中间空一行」）。锁定后不再搬，避免流式期间上下跳。
 	      // 稳态零布局读取：确认过「有可见文字」的块记进 textSeen，之后不再读 innerText。
 	      var anyUnresolved = false;
 	      for (var g = 0; g < groups.length; g++) {
+	        // 组内没有任何成员进预热带 → 整组跳过（切会话时屏外那 98 轮在这里被挡掉）
+	        var groupVisible = false;
+	        for (var gv = 0; gv < groups[g].length; gv++) {
+	          if (visSet.has(groups[g][gv].el)) { groupVisible = true; break; }
+	        }
+	        if (groupVisible !== true) continue;
 	        var host = null;
 	        var hostIdx = -1;
 	        var firstVis = null;
@@ -437,9 +551,8 @@ function nameEl(text, isUser) {
 	        "[data-zy-av]::before{content:var(--zy-letter,\"\");position:absolute;top:2px;width:var(--zy-size,40px);height:var(--zy-size,40px);display:flex;align-items:center;justify-content:center;background-color:var(--zy-bg,transparent);background-image:var(--zy-url,none);background-size:cover;background-position:center;clip-path:inset(0 round var(--zy-round,20px));color:#fff;font-size:var(--zy-font,18px);font-weight:600;overflow:hidden}" +
 	        "[data-zy-av]::after{content:attr(data-zy-name);position:absolute;top:0;left:0;right:0;height:16px;line-height:16px;font-size:12px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;pointer-events:none}" +
 	        // AI：昵称画在块上方的 16px 间距里，不额外占块内高度（避免多出一条空白）
-	        "[data-zy-av=\"ai\"]{padding-top:0}" +
-	        "[data-zy-av=\"ai\"]::before{top:calc(var(--zy-dy,0px) - 14px);left:0}" +
-	        "[data-zy-av=\"ai\"]::after{top:calc(var(--zy-dy,0px) - 16px);text-align:left;padding-left:calc(var(--zy-size,40px) + 12px)}" +
+	        "[data-zy-av=\"ai\"]::before{top:2px;left:0}" +
+	        "[data-zy-av=\"ai\"]::after{top:0;text-align:left;padding-left:calc(var(--zy-size,40px) + 12px)}" +
 	        // 用户：昵称在块内顶部 16px 预留区，头像贴右
 	        "[data-zy-av=\"user\"]::before{top:2px;right:0}" +
 	        "[data-zy-av=\"user\"]::after{text-align:right;padding-right:calc(var(--zy-size,40px) + 12px)}" +
@@ -688,8 +801,32 @@ function nameEl(text, isUser) {
 	            }
 	            if (row === null || row === void 0) return;
 	            if (row.getAttribute(HOST_ATTR) !== null) return;
+	            // 外层块里已经有带宿主的内部 userRow（裸行先挂、随后被 flowItem 包起来）：
+	            // 只让位，不再给外层重复挂——否则一条消息两个头像/两倍缩进。
+	            var innerPrev = null;
+	            try { innerPrev = typeof row.querySelector === "function" ? row.querySelector('[class*="userRow"]') : null; } catch (ePrev) { innerPrev = null; }
+	            if (innerPrev !== null && innerPrev !== row && innerPrev.getAttribute(HOST_ATTR) !== null) {
+	              shiftForAvatar(innerPrev, true);
+	              return;
+	            }
 	            injectAvatar(row, true);
 	          } catch (e) { /* 补头像失败不影响其余 */ }
+	        };
+	        // 新增子树里夹带的裸 userRow（整块挂载时 added 可能是外层包裹层，
+	        // closest 只往上找，抓不到里面的行）——这类节点同步补头像。
+	        // 只在子树里没有 flowItem 时处理：带 flowItem 的是历史/会话整段挂载，
+	        // 走容器扫描按可见性挑，避免把屏外轮次也挂上。
+	        var ensureRowsIn = function (root) {
+	          try {
+	            if (root === null || root === void 0 || root.nodeType !== 1) return;
+	            if (typeof root.querySelector !== "function") return;
+	            if (root.querySelector('[class*="flowItem"]') !== null) return;
+	            var rows = root.querySelectorAll('[class*="userRow"], [data-chat-flow-kind="user"]');
+	            for (var ri = 0; ri < rows.length && ri < 4; ri++) {
+	              if (rows[ri].getAttribute(HOST_ATTR) !== null) continue;
+	              injectAvatar(rows[ri], true);
+	            }
+	          } catch (eRows) { /* 忽略 */ }
 	        };
 	        var scanDirty = function (records) {
 	          var dirty = null;
@@ -711,12 +848,14 @@ function nameEl(text, isUser) {
 	              }
 	            }
 	            if (!structural) continue;
+            lastStructMutationAt = Date.now();
 	            // 新发出的用户消息：直接补头像，不依赖容器分类/缓存。
 	            // 裸 userRow / flowItem 两步插入都走这里；React 之后重渲染抹掉的，
 	            // 下一批 mutation 会再补一次。
 	            if (cfg !== null && cfg !== void 0) {
 	              ensureRowAvatar(rec.target);
 	              for (var fa = 0; added !== null && fa < added.length; fa++) ensureRowAvatar(added[fa]);
+	              for (var fb = 0; added !== null && fb < added.length; fb++) ensureRowsIn(added[fb]);
 	            }
 	            var cont = containerFor(rec.target);
 	            if (cont === null) {
@@ -782,7 +921,50 @@ function nameEl(text, isUser) {
 		          ensureWideObserver();
 		        };
 	        scan();
-		new MutationObserver(scanDirty).observe(document.body, { childList: true, subtree: true });
+	        new MutationObserver(scanDirty).observe(document.body, { childList: true, subtree: true });
+	        // ── 可见性驱动补挂（滚动 / IO 命中）────────────────────
+	        // 作废容器缓存 + 同步重扫，让新进屏的轮次当帧补挂。
+	        onVisibilityChange = function () {
+	          try {
+	            for (var ci = 0; ci < knownContainers.length; ci++) containerState.delete(knownContainers[ci]);
+	            queueScan();
+	          } catch (eVis) { /* 忽略 */ }
+	        };
+	        // 滚动同步补挂：scroll 事件在绘制前触发，同一帧里挂好 →
+	        // 拖动滚动条跳到最早一轮 / Ctrl+Home / 引用跳转都赶得上。
+	        // rAF 合并同帧多次滚动。注意：这里**不做全量 rect 扫描**——120 轮全量读一次
+	        // 就吃掉 200ms+（切会话时每帧都扫更狠）。改成在容器子节点上二分定位：
+	        // 先二分找到第一个「没完全滚出视口上方」的块（约 7 次读），再顺序补到视口
+	        // 下方边界（通常 2~4 块）→ 与历史长度解耦，跳多远都是十几次读。
+	        var scrollScheduled = false;
+	        // 结构变动静默期：切会话/整段重建时，每帧都有新块落 DOM，
+	        // 这时候跑二分补挂会在「刚写完样式」的脏布局上反复强制重排（实测吃 200ms+）。
+	        // 挂载期交给播种（同帧完成），等 250ms 没有结构变动再恢复滚动补挂。
+	        var lastStructMutationAt = 0;
+	        var syncVisibleFromScroll = function () {
+	          // 挂载风暴期间不补挂：新块由播种同帧处理，避免在脏布局上反复量 rect
+	          if (Date.now() - lastStructMutationAt < 250) return;
+	          var changed = false;
+	          for (var ci2 = 0; ci2 < knownContainers.length; ci2++) {
+	            var cont2 = knownContainers[ci2];
+	            if (cont2 === null || cont2.isConnected !== true) continue;
+	            try { if (markVisibleRange(cont2)) changed = true; } catch (eC) { /* 单容器失败不影响其余 */ }
+	          }
+	          if (changed === true && typeof onVisibilityChange === "function") onVisibilityChange();
+	        };
+	        document.addEventListener("scroll", function (event) {
+	          var t = event.target;
+	          // 只认聊天滚动容器：输入框等内部滚动直接丢，避免每帧白跑
+	          if (t !== document && t !== document.documentElement && t !== document.body) {
+	            if (typeof t.querySelector !== "function" || t.querySelector('[data-slot="conversation.chat.flow"]') === null) return;
+	          }
+	          if (scrollScheduled === true) return;
+	          scrollScheduled = true;
+	          requestAnimationFrame(function () {
+	            scrollScheduled = false;
+	            try { syncVisibleFromScroll(); } catch (eScroll) { /* 忽略 */ }
+	          });
+	        }, { passive: true, capture: true });
 	        // 启动竞态兜底：会话树可能在观察者挂上之前就已经挂载（插件加载慢于界面首帧），
 	        // 首扫会扫到空容器、之后又没有 mutation 触发 → 整屏没有头像。
 	        // 这里补两次延迟扫描：一次覆盖首屏渲染，一次覆盖懒加载历史。
