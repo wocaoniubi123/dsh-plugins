@@ -206,6 +206,50 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
   // 插件冲突修复开关：默认开。关闭后不再输出 .dig-* 那批覆盖规则。
   var dedigEnabled = true;
 
+  // ── 侧栏导航结构锚点 ──────────────────────────────────────────────
+  // 背景：CSS module 的哈希前缀（_2gh8Yq_ 这类）每次 DSH 升级都可能变，
+  // 只靠 [class*="panelList"] 这种子串匹配，改名一次就失效（2.0.23 已中过一次）。
+  // 做法：按「结构特征」找出侧栏导航，打上 data-dst-nav；样式挂在这个属性上。
+  // 结构特征：<nav>、内部按钮 ≥2、宽 ≥120px、贴窗口左侧（left < 320px）。
+  // React 重建 nav 后属性会丢，由 MutationObserver + 低频兜底重新打标。
+  var NAV_MARK = "data-dst-nav";
+  function findPanelNav() {
+    var navs = document.querySelectorAll("nav");
+    var best = null;
+    for (var i = 0; i < navs.length; i++) {
+      var n = navs[i];
+      var count = n.querySelectorAll("button").length;
+      if (count < 2) continue;
+      var r = n.getBoundingClientRect();
+      if (r.width < 120 || r.left > 320) continue;
+      if (best === null || count > best.count) best = { el: n, count: count };
+    }
+    return best === null ? null : best.el;
+  }
+  function markPanelNav() {
+    try {
+      if (document.querySelector("nav[" + NAV_MARK + "]") !== null) return;
+      var nav = findPanelNav();
+      if (nav !== null) nav.setAttribute(NAV_MARK, "");
+    } catch (e) { /* 打标失败不影响其它功能 */ }
+  }
+  function watchPanelNav() {
+    if (typeof document === "undefined" || typeof MutationObserver === "undefined" || !document.body) {
+      return function () {};
+    }
+    markPanelNav();
+    var mo = new MutationObserver(function () {
+      if (document.querySelector("nav[" + NAV_MARK + "]") === null) markPanelNav();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    // 兜底：侧栏折叠/展开只改样式不产生结构变动，observer 收不到，低频补打一次。
+    var timer = setInterval(markPanelNav, 2500);
+    return function () {
+      mo.disconnect();
+      clearInterval(timer);
+    };
+  }
+
   function installStyles(force) {
     if (typeof document === "undefined") return;
     var existing = document.querySelector("style[data-plugin-css=" + JSON.stringify("dsh-session-tools/section.css") + "]");
@@ -268,9 +312,20 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       // 侧栏导航改成两列：容器由竖向 flex 改成横向换行，每个条目占一半宽
       //（胶囊背景随宽度缩短），行高 36→32、间距 2→4。
       "[class*=\"panelList\"]{flex-direction:row!important;flex-wrap:wrap!important;gap:2px!important;height:auto!important}" +
-      "[class*=\"panelList\"] > *{flex:1 1 calc(50% - 1px)!important;max-width:calc(50% - 1px)!important;min-width:0!important}" +
+      "[class*=\"panelList\"] > *{box-sizing:border-box!important;flex:1 1 calc(50% - 1px)!important;max-width:calc(50% - 1px)!important;min-width:0!important}" +
       "[class*=\"panelList\"] [class*=\"panelRow\"]{height:28px!important;min-height:28px!important;padding:4px 8px!important;box-sizing:border-box!important}" +
       "[class*=\"panelList\"] [class*=\"panelRow\"] span{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}" +
+      // ── 侧栏导航：结构锚点版（抗 DSH 升级）─────────────────────────────
+      // CSS module 的哈希前缀（_2gh8Yq_ 这类）每次升级都会变，只挂 class 子串迟早失效。
+      // 客户端 JS 按结构找出侧栏 nav 并打上 data-dst-nav（React 重建后自动补打），
+      // 这里把两列规则同时挂到该属性上，class 那条只当兜底。
+      // 新版把每个条目包了一层 panelEntry（左右各 3px 装饰边框 + content-box），
+      // 只设 max-width 会让两条 137px 挤不进 264px 容器 → 退化成单列；
+      // 所以子项统一 box-sizing:border-box，宽度按 border-box 折半。
+      "[data-dst-nav]{display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;gap:2px!important;height:auto!important}" +
+      "[data-dst-nav] > *{box-sizing:border-box!important;flex:1 1 calc(50% - 1px)!important;max-width:calc(50% - 1px)!important;min-width:0!important}" +
+      "[data-dst-nav] button{height:28px!important;min-height:28px!important;padding:4px 8px!important;box-sizing:border-box!important}" +
+      "[data-dst-nav] button span{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}" +
       // 底部：账号行占左侧，远程控制挪到右侧同一行（原先是上下两行）
       "[class*=\"footArea\"]{flex-direction:row!important;align-items:center!important;gap:8px!important}" +
       "[class*=\"footArea\"] > [class*=\"footerActions\"]{order:2!important;flex:0 0 auto!important;width:auto!important;min-width:0!important}" +
@@ -1011,6 +1066,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       return ctx.locale.register(NS, { zh: zh, en: en });
     }, "dsh-session-tools: dictionaries");
     ctx.effect(installStyles, "dsh-session-tools: styles");
+    ctx.effect(watchPanelNav, "dsh-session-tools: sidebar nav anchor");
     // 兼容开关：启动时读 host 的 compat.json；关闭时重建样式（不再输出 .dig-* 覆盖）
     wireCall("sessionTools", "getCompat", {}).then(function (value) {
       var on = !(value && value.dedig === false);
