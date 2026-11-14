@@ -1189,8 +1189,36 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
   // 局部扫描（只扫设置弹窗模型区块）：幂等，锚点缺失即停。
   // flushStaged 必须在 DOM gate 之前：行保存后编辑器关闭、容量按钮消失，
   // 但 staging 落盘不依赖 DOM，只依赖快照（行 id 已出现在配置里即可写）。
+  // ── 设置弹窗闸门 ─────────────────────────────────────────────────
+  // injector 的 observer 挂在 document.body 上（全局）：会话页每有一次结构变动
+  // 也会排队一次 reconcile，而 reconcile 开头会做 4 次全文档查询才发现"没有设置页"
+  //（实测 0.8~1.1ms/次，活跃时最多 8 次/秒，纯粹空转）。
+  // 闸门策略：没见过弹窗就直接返回（零查询）；见过之后才去探测，弹窗消失即复位。
+  var injectorDialogEl = null;
+  var injectorSawDialog = false;
+  function injectorDialogPresent() {
+    if (injectorDialogEl !== null && injectorDialogEl.isConnected === true) return true;
+    if (injectorSawDialog !== true) return false;
+    injectorDialogEl = document.querySelector('[role="dialog"]');
+    if (injectorDialogEl === null) injectorSawDialog = false;
+    return injectorDialogEl !== null;
+  }
+  function injectorHasStaged() {
+    for (var route in injectorStaged) {
+      var bucket = injectorStaged[route];
+      if (bucket && Object.keys(bucket).length > 0) return true;
+    }
+    return false;
+  }
   function injectorReconcile() {
     if (!injectorScope) return;
+    if (!injectorDialogPresent()) {
+      // 关窗瞬间可能还有 staged 没落盘：补 flush 一次，之后不再扫描
+      if (injectorHasStaged()) {
+        try { injectorFlushStaged(); } catch (e) { /* 落盘失败留给下次 */ }
+      }
+      return;
+    }
     injectorFlushStaged();
     injectorExpandCustomized();
     try { injectorEnableScan(); } catch (e) { /* 勾选注入失败不拖垮扫描 */ }
@@ -1263,7 +1291,26 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
     injectorObserved = true;
     injectorScope = sc;
     injectorSchedule();
-    new MutationObserver(function () { injectorSchedule(); }).observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(function (records) {
+      // 只在"还没见过弹窗"时做这次探测：设置壳一出现就把开关打开，
+      // 之后的 reconcile 才允许去查 DOM（见 injectorDialogPresent）。
+      if (injectorSawDialog !== true) {
+        for (var i = 0; i < records.length && injectorSawDialog !== true; i++) {
+          var rec = records[i];
+          if (rec.type !== "childList") continue;
+          for (var j = 0; j < rec.addedNodes.length; j++) {
+            var node = rec.addedNodes[j];
+            if (node.nodeType !== 1) continue;
+            if ((typeof node.getAttribute === "function" && node.getAttribute("role") === "dialog") ||
+                (typeof node.querySelector === "function" && node.querySelector('[role="dialog"]') !== null)) {
+              injectorSawDialog = true;
+              break;
+            }
+          }
+        }
+      }
+      injectorSchedule();
+    }).observe(document.body, { childList: true, subtree: true });
     // 打字不产生 DOM 结构变动，MutationObserver 不触发；但新卡后填 Provider ID /
     // 模型 ID 需要重扫才能挂编辑器/预置 staging，所以监听 input 事件兜底。
     document.addEventListener("input", function () { injectorSchedule(); }, true);

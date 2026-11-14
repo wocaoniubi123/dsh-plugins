@@ -259,13 +259,14 @@ function nameEl(text, isUser) {
 	        it.tech = it.user ? null : techKindOf(it.el);
 	      }
 
-	      // ── 2. 读布局：进组的块各读一次高度（本次扫描唯一一次强制重排）──
-	      for (var q = 0; q < plan.length; q++) {
-	        var it2 = plan[q];
-	        if (it2.kind === "box" || it2.kind === "run" || (it2.kind === "flow" && !it2.user && it2.tech === null)) {
-	          it2.h = it2.el.offsetHeight;
-	        }
-	      }
+	      // ── 2. 不再在扫描里预读布局 ──
+	      // 旧实现在这里给每个候选块读 offsetHeight（一次强制重排），宿主挑完再写头像，
+	      // 写入又让布局失效 → 浏览器为绘制再排一次，等于每次挂载多付一次整页布局
+	      //（实测 78 块容器 162ms，切会话整段 +285ms）。
+	      // 现在先按「组首块」当宿主直接注入，等下一帧 rAF（此时布局本来就要算）
+	      // 再校验宿主高度，必要时把头像挪到第一个有高度的块上——rAF 早于绘制，
+	      // 用户看不到一次错误位置，视觉效果与旧实现一致。
+	      var pendingFix = [];
 
 	      // ── 3. 算：分组 + 每组宿主（纯 JS，不碰 DOM）──
 	      var groups = [];
@@ -297,12 +298,10 @@ function nameEl(text, isUser) {
 	          shiftForAvatar(uu.el, false);
 	        }
 	      }
-	      // 每组头像只挂第一个有高度的块（0 高度幽灵块跳过），多余的头像一律移除——收敛式，自愈流式/容器重组残留
+	      // 每组头像先挂组首块（高度校验延后到下一帧），多余的头像一律移除——收敛式，自愈流式/容器重组残留
 	      for (var g = 0; g < groups.length; g++) {
-	        var host = null;
-	        for (var j = 0; j < groups[g].length; j++) {
-	          if (groups[g][j].h > 0) { host = groups[g][j]; break; }
-	        }
+	        var host = groups[g].length > 0 ? groups[g][0] : null;
+	        if (host !== null) pendingFix.push({ group: groups[g], el: host.el });
 	        for (var k = 0; k < groups[g].length; k++) {
 	          var blk = groups[g][k].el;
 	          shiftForAvatar(blk, false);
@@ -317,6 +316,29 @@ function nameEl(text, isUser) {
 	            removeAvatar(blk);
 	          }
 	        }
+	      }
+	      // 下一帧校验宿主高度：0 高度幽灵块（折叠/过渡中的空块）把头像挪到组内
+	      // 第一个有高度的块。rAF 在绘制之前执行，用户看不到中间态。
+	      if (pendingFix.length > 0) {
+	        requestAnimationFrame(function () {
+	          for (var fx = 0; fx < pendingFix.length; fx++) {
+	            var item = pendingFix[fx];
+	            var hostEl = item.el;
+	            if (hostEl === null || hostEl === void 0 || hostEl.isConnected !== true) continue;
+	            if (hostEl.offsetHeight > 0) continue;
+	            var next = null;
+	            for (var fj = 1; fj < item.group.length; fj++) {
+	              var cand = item.group[fj].el;
+	              if (cand.isConnected === true && cand.offsetHeight > 0) { next = cand; break; }
+	            }
+	            if (next === null) { removeAvatar(hostEl); continue; }
+	            removeAvatar(hostEl);
+	            shiftForAvatar(next, false);
+	            injectAvatar(next, false);
+	            var moved = next.querySelector("[" + AV_MARK + "]");
+	            if (moved !== null) moved.setAttribute("data-ziyong-ai", "1");
+	          }
+	        });
 	      }
 	    }
 
@@ -441,7 +463,7 @@ function nameEl(text, isUser) {
 
     function start() {
       if (observed || typeof MutationObserver === "undefined" || typeof document === "undefined" || !document.body) return;
-      observed = true;
+	      observed = true;
       installFlowStyles();
       // Enter 换行模式（设置面板勾选后）：capture 阶段接管输入框的回车。
       //   · 纯 Enter：拦下官方「回车发送」，改成插入一个换行；
