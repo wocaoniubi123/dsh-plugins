@@ -407,7 +407,11 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       ".dst_archRowTitle{min-width:0;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       ".dst_archRowActions{display:inline-flex;align-items:center;gap:8px;flex:none}" +
       ".dst_archAction{cursor:pointer;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-elevated-fill);color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 10px;font:inherit;font-size:12px}" +
-      ".dst_archActionDanger:hover{color:var(--dsw-alias-state-error-primary)}" +
+      ".dst_archActionDanger{color:var(--dsw-alias-state-error-primary,#e5484d)!important;border-color:var(--dsw-alias-state-error-primary,#e5484d)!important}" +
+      ".dst_archActionDanger:hover:not(:disabled){background:var(--dsw-alias-state-error-primary,#e5484d)!important;border-color:var(--dsw-alias-state-error-primary,#e5484d)!important;color:#fff!important}" +
+      // 删除确认弹窗的「删除⏎」按钮：常态红字红边，hover 反白填充
+      ".dst_dangerBtn{color:var(--dsw-alias-state-error-primary,#e5484d)!important;border-color:var(--dsw-alias-state-error-primary,#e5484d)!important}" +
+      ".dst_dangerBtn:hover:not(:disabled){background:var(--dsw-alias-state-error-primary,#e5484d)!important;border-color:var(--dsw-alias-state-error-primary,#e5484d)!important;color:#fff!important}" +
       ".dst_archBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}" +
       ".dst_archMeta{font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
       // 官方侧栏头部按钮行 `.headerActions{max-width:60px;overflow:hidden}`（刚好两个按钮，
@@ -565,6 +569,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
         }),
         (0, react_jsx_runtime.jsx)("span", { "data-dsh-session-tools-confirm": "1", children: (0, react_jsx_runtime.jsx)(_primitives.Button, {
           variant: "outline",
+          className: "dst_dangerBtn",
           disabled: busy,
           onClick: function () {
             setBusy(true);
@@ -1048,7 +1053,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 
   // ── 会话右键菜单（跟着鼠标位置）──
   // 官方菜单只从行尾「操作」按钮弹出，不走右键；这里在会话行上拦截 contextmenu，
-  // 用官方 Menu 的 getAnchorRect 把菜单放到鼠标坐标弹出。
+  // 用官方 Menu 的 anchorPoint（视口坐标）把菜单放到鼠标位置弹出。
   // 条目与官方菜单对齐：置顶会话 / 重命名 / 分叉会话 / 归档会话 / 删除会话。
   function SessionContextMenu(props) {
     var t = props.t;
@@ -1118,6 +1123,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     items.push({
       id: "delete",
       label: t("ctxDelete"),
+      danger: true,
       icon: (0, react_jsx_runtime.jsx)(_primitives.IconTrashOutlineRegular, {})
     });
     return (0, react_jsx_runtime.jsx)(_primitives.Menu, {
@@ -1131,11 +1137,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       portal: true,
       side: "bottom",
       align: "start",
-      // 不走 anchor 元素：官方文档说 effect-positioned proxy 这种要直接用 getAnchorRect，
-      // 否则测量锚点会和布局效应打架（实测菜单会落到视口左上）。这里给鼠标坐标。
-      getAnchorRect: function () {
-        return { left: request.x, right: request.x, top: request.y, bottom: request.y, width: 0, height: 0 };
-      }
+      // 新版官方 Menu 用 anchorPoint（视口坐标）定位右键菜单；
+      // 旧版的 getAnchorRect 在新版本里已不存在（传了会被忽略 → 菜单落到视口左上角）。
+      anchorPoint: { x: request.x, y: request.y }
     });
   }
 
