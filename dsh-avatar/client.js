@@ -18,6 +18,11 @@ window.__ModuleLoader__.load({
     var NS = "dsh-avatar";
     var AV_MARK = "data-ziyong-avatar";
     var NAME_MARK = "data-ziyong-avatar-name";
+    // 方案 B：头像/昵称用「块属性 + CSS 伪元素」渲染（不再建 DOM 节点）。
+    // 属性不会被 React 重渲染清掉，稳态下零增删、零布局写入。
+    var HOST_ATTR = "data-zy-av";   // "ai" | "user"
+    var NAME_ATTR = "data-zy-name"; // 昵称文本（::after content:attr()）
+    var RUN_ATTR = "data-zy-run";   // 运行行宿主（撑高 + 状态行贴底）
     var ICON_MARK = "data-dsh-avatar-nav-icon";
     var AI_SHIFT = "data-ziyong-ai-shift";     // 左侧让位（AI 块/技术条目），缩进由 CSS 变量驱动
     var USER_SHIFT = "data-ziyong-user-shift"; // 右侧让位（用户消息），同上
@@ -114,84 +119,87 @@ function nameEl(text, isUser) {
       return s;
     }
 
-	    // 微信式布局：头像绝对定位在气泡侧旁（AI 左 / 用户右），内容区缩出让位，
-	    // 昵称在内容区顶部（AI 靠左 / 用户靠右）。AV_MARK 挂头像，NAME_MARK 挂昵称。
-	    // 让位缩进：内联 padding（当前尺寸）+ 打标记（refreshLiveStyles 靠标记判断哪一侧缩进）。
+	    // 微信式布局：头像在气泡侧旁（AI 左 / 用户右），昵称在内容区顶部。
+	    // 方案 B：头像/昵称不再建 DOM 节点，改为「块属性 + CSS 伪元素」渲染。
+	    // 属性 React 重渲染不会清，稳态下零增删、零布局写入 → 不再有周期性抖动。
+	    // 让位缩进由 CSS 变量驱动（--zy-size），这里只打标记。
 	    function shiftForAvatar(flowItem, isUser) {
-	      flowItem.setAttribute(isUser ? USER_SHIFT : AI_SHIFT, "");
-	      var inset = avatarSize() + 12;
-	      flowItem.style.position = "relative";
-	      if (isUser) flowItem.style.paddingRight = inset + "px";
-	      else flowItem.style.paddingLeft = inset + "px";
+	      var mark = isUser ? USER_SHIFT : AI_SHIFT;
+	      if (flowItem.getAttribute(mark) === null) flowItem.setAttribute(mark, "");
+	      if (flowItem.style.getPropertyValue("--zy-size") === "") {
+	        flowItem.style.setProperty("--zy-size", avatarSize() + "px");
+	      }
 	    }
-	    // 拖动滑块时原地更新所有已注入节点的内联样式（不删建节点、不改 CSS 变量——原因见 avatarEl 注释）。
-	    // 实测：JS ~0.5ms + 浏览器重排 ~2ms（仅这些节点失效），拖动每步实际 2~3ms。
+	    // 拖动滑块时只改 CSS 变量（不删建节点、不写布局属性）
 	    function refreshLiveStyles() {
 	      var size = avatarSize();
 	      var rad = avatarRadius();
 	      var roundR = Math.round(size / 2 * rad / 100 * 10) / 10;
 	      var font = Math.round(size * 0.45);
-	      var pad = (size + 12) + "px";
-	      var avs = document.querySelectorAll("[" + AV_MARK + "]");
-	      for (var i = 0; i < avs.length; i++) {
-	        avs[i].style.width = size + "px";
-	        avs[i].style.height = size + "px";
-	        avs[i].style.clipPath = "inset(0 round " + roundR + "px)";
-	        avs[i].style.fontSize = font + "px";
+	      var hosts = document.querySelectorAll("[" + HOST_ATTR + "]");
+	      for (var i = 0; i < hosts.length; i++) {
+	        hosts[i].style.setProperty("--zy-size", size + "px");
+	        hosts[i].style.setProperty("--zy-round", roundR + "px");
+	        hosts[i].style.setProperty("--zy-font", font + "px");
 	      }
 	      var rows = document.querySelectorAll("[" + AI_SHIFT + "], [" + USER_SHIFT + "]");
-	      for (var j = 0; j < rows.length; j++) {
-	        if (rows[j].getAttribute(USER_SHIFT) !== null) rows[j].style.paddingRight = pad;
-	        else rows[j].style.paddingLeft = pad;
+	      for (var j = 0; j < rows.length; j++) rows[j].style.setProperty("--zy-size", size + "px");
+	    }
+
+	    // 头像参数写到块的 CSS 变量上（只在值变化时写；伪元素消费这些变量）
+	    function applyAvatarVars(flowItem, role) {
+	      var size = avatarSize();
+	      var rad = avatarRadius();
+	      var roundR = Math.round(size / 2 * rad / 100 * 10) / 10;
+	      var font = Math.round(size * 0.45);
+	      var name = role === "user" ? (cfg.userName || "") : (cfg.assistantName || "");
+	      var url = role === "user" ? cfg.userAvatar : cfg.assistantAvatar;
+	      var vm = flowItem.style;
+	      var setVar = function (key, value) {
+	        if (vm.getPropertyValue(key) !== value) vm.setProperty(key, value);
+	      };
+	      setVar("--zy-size", size + "px");
+	      setVar("--zy-round", roundR + "px");
+	      setVar("--zy-font", font + "px");
+	      setVar("--zy-bg", role === "user" ? "var(--dsw-alias-state-success-primary, #2f855a)" : "var(--dsw-alias-state-info-primary, #3182ce)");
+	      if (typeof url === "string" && url.length > 0) {
+	        setVar("--zy-url", 'url("' + url.replace(/"/g, '\\"') + '")');
+	        setVar("--zy-letter", '""');
+	      } else {
+	        if (vm.getPropertyValue("--zy-url") !== "") vm.removeProperty("--zy-url");
+	        var ch = Array.from(name)[0] || "";
+	        setVar("--zy-letter", '"' + ch.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"');
 	      }
-	      var runs = document.querySelectorAll("[" + RUN_MARK + "]");
-	      for (var k = 0; k < runs.length; k++) {
-	        if (runs[k].style.minHeight !== "") runs[k].style.minHeight = (size + 2) + "px";
-	      }
+	      if (flowItem.getAttribute(NAME_ATTR) !== name) flowItem.setAttribute(NAME_ATTR, name);
 	    }
 
 	    function injectAvatar(flowItem, isUser) {
-	      if (flowItem.querySelector("[" + AV_MARK + "]")) return;
 	      if (!cfg) return;
+	      var role = isUser ? "user" : "ai";
+	      if (flowItem.getAttribute(HOST_ATTR) !== role) flowItem.setAttribute(HOST_ATTR, role);
+	      applyAvatarVars(flowItem, role);
 	      shiftForAvatar(flowItem, isUser);
-	      var avatar = avatarEl(cfg, isUser ? "user" : "assistant");
-	      avatar.setAttribute(AV_MARK, "");
-	      avatar.style.position = "absolute";
-	      avatar.style.top = "2px";
-	      if (isUser) {
-	        avatar.style.right = "0";
-	      } else {
-	        avatar.style.left = "0";
-	      }
-	      // 「运行中」状态行宿主贴底时，头像下缘会伸进输入区被盖住——
-	      // 把宿主撑到刚好容纳头像（头像绝对定位，不影响行内其余内容）；
-	      // 同时把官方状态行内容推到底部，与头像底边齐平（状态行贴着头像下方平行）
-	      if (flowItem.getAttribute(RUN_MARK) !== null) {
-	        flowItem.style.minHeight = (avatarSize() + 2) + "px";
-	        flowItem.style.display = "flex";
-	        flowItem.style.flexDirection = "column";
-	        var runningContent = flowItem.querySelector('[class*="runningContent"]');
-	        if (runningContent !== null) runningContent.style.marginTop = "auto";
-	      }
-      flowItem.appendChild(avatar);
-      // 昵称：内容顶部，与头像同侧对齐。留空时也插入空行占位，保持内容位置不变。
-      var displayName = isUser ? (cfg.userName || "") : (cfg.assistantName || "");
-      var name = nameEl(displayName, isUser);
-      name.setAttribute(NAME_MARK, "");
-      name.setAttribute("data-ziyong-empty", displayName.length > 0 ? "0" : "1");
-      flowItem.insertBefore(name, flowItem.firstElementChild);
-	      // 用户消息：气泡背景去掉（与头像昵称更搭）
-	      if (isUser) {
-	        var bubbles = flowItem.querySelectorAll('[class*="bubble"]');
-	        for (var i = 0; i < bubbles.length; i++) {
-	          if (!bubbles[i].getAttribute(BUBBLE_CSS_MARK)) {
-	            bubbles[i].setAttribute(BUBBLE_CSS_MARK, "");
-	            bubbles[i].style.background = "transparent";
-	            bubbles[i].style.border = "none";
-	            bubbles[i].style.borderRadius = "0";
-	            bubbles[i].style.padding = "0 0 0 0";
+	      // AI 宿主可能是个 0 高度的包裹层（内容靠子节点撑）：记下「第一行可见内容」
+	      // 相对宿主顶部的偏移，昵称/头像按这个偏移贴上去，就不会和内容之间空一截。
+	      // 只在首次注入时量一次（锁定宿主，之后不再量）。
+	      if (role === "ai" && flowItem.style.getPropertyValue("--zy-dy") === "") {
+	        try {
+	          var hostRect = flowItem.getBoundingClientRect();
+	          var firstRect = null;
+	          var allKids = flowItem.querySelectorAll("*");
+	          for (var di = 0; di < allKids.length; di++) {
+	            var r0 = allKids[di].getBoundingClientRect();
+	            if (r0.height > 0) { firstRect = r0; break; }
 	          }
-	        }
+	          if (firstRect !== null) {
+	            var dy = Math.round(firstRect.top - hostRect.top);
+	            if (dy > 0 && dy < 200) flowItem.style.setProperty("--zy-dy", dy + "px");
+	          }
+	        } catch (eDy) { /* 量不到就按 0 处理 */ }
+	      }
+	      // 运行行宿主：撑到刚好容纳头像、状态行内容贴底（原内联样式改成属性 + CSS）
+	      if (flowItem.getAttribute(RUN_MARK) !== null && flowItem.getAttribute(RUN_ATTR) === null) {
+	        flowItem.setAttribute(RUN_ATTR, "");
 	      }
 	    }
 
@@ -204,8 +212,13 @@ function nameEl(text, isUser) {
 	      return null;
 	    }
 
-	    // 移除某 AI 块上多余的头像+昵称（组内只允许头像宿主挂）
+	    // 移除某 AI 块上的头像/昵称（组内只允许头像宿主挂）
 	    function removeAvatar(flowItem) {
+	      // 属性版：去掉标记，伪元素随之消失
+	      if (flowItem.getAttribute(HOST_ATTR) !== null) flowItem.removeAttribute(HOST_ATTR);
+	      if (flowItem.getAttribute(NAME_ATTR) !== null) flowItem.removeAttribute(NAME_ATTR);
+	      if (flowItem.getAttribute(RUN_ATTR) !== null) flowItem.removeAttribute(RUN_ATTR);
+	      // 迁移：清掉旧版本（DOM 节点版）可能留下的头像/昵称节点
 	      var av = flowItem.querySelector("[" + AV_MARK + "]");
 	      if (av) {
 	        av.remove();
@@ -225,6 +238,21 @@ function nameEl(text, isUser) {
 	    var RUN_MARK = "data-ziyong-runrow";
 	    // 容器级缓存：{ n, first, last, hosts }。结构签名一致且头像齐全 → 整段跳过。
 	    var containerState = new WeakMap();
+	    // 「确认过有可见文字」的块：稳态下不再读 innerText（避免每轮扫描都强制布局）
+	    var textSeen = new WeakSet();
+	    // 「宿主还没定下来」的容器重试计数：正文常以文本节点形式长出来，
+	    // 我们的 observer 只收元素级变动 → 不会重扫。这里补定时重试（最多 3 次）。
+	    var recheckLeft = new WeakMap();
+	    function scheduleRecheck(container) {
+	      try {
+	        var n = recheckLeft.get(container) || 0;
+	        if (n >= 3) return;
+	        recheckLeft.set(container, n + 1);
+	        setTimeout(function () {
+	          try { scanContainer(container); } catch (e) { /* 忽略 */ }
+	        }, 180 + n * 220);
+	      } catch (e2) { /* 忽略 */ }
+	    }
 	    // 读-算-写三段式。背景：DOM 变动后第一次读 offsetHeight 会强制整页重排
 	    // （实测 110 条消息 / 4168 节点：28~41ms）。原实现"写 padding → 读高度 →
 	    // 再写"交替，一次扫描触发多次重排，平均 55ms/次 DOM 突变。这里把布局读取
@@ -263,10 +291,8 @@ function nameEl(text, isUser) {
 	      // 旧实现在这里给每个候选块读 offsetHeight（一次强制重排），宿主挑完再写头像，
 	      // 写入又让布局失效 → 浏览器为绘制再排一次，等于每次挂载多付一次整页布局
 	      //（实测 78 块容器 162ms，切会话整段 +285ms）。
-	      // 现在先按「组首块」当宿主直接注入，等下一帧 rAF（此时布局本来就要算）
-	      // 再校验宿主高度，必要时把头像挪到第一个有高度的块上——rAF 早于绘制，
-	      // 用户看不到一次错误位置，视觉效果与旧实现一致。
-	      var pendingFix = [];
+	      // 现在不在扫描里做布局读取；宿主定位在下面用 innerText（可见文字）判断，
+	      // 且**每轮只定位一次并锁定**，不做实时搬移（避免流式期间昵称上下跳）。
 
 	      // ── 3. 算：分组 + 每组宿主（纯 JS，不碰 DOM）──
 	      var groups = [];
@@ -288,58 +314,72 @@ function nameEl(text, isUser) {
 	      for (var u = 0; u < plan.length; u++) {
 	        var uu = plan[u];
 	        if (uu.kind === "flow" && uu.user) {
-	          var existAv = uu.el.querySelector("[" + AV_MARK + "]");
-	          if (existAv === null) injectAvatar(uu.el, true);
-	          // 头像可能已经挂在内部 userRow 上（发送瞬间的裸行被复用进 flowItem）：
-	          // 那种情况让位缩进已经写在 userRow 上，这里再补一次就是双倍边距。
-	          else if (existAv.parentElement === uu.el) shiftForAvatar(uu.el, true);
+	          // 发送瞬间的裸行可能被复用进 flowItem：内部 userRow 已带头像就沿用它，
+	          // 否则在外层块上注入（避免同一消息挂两个头像/双倍边距）。
+	          var innerRow = uu.el.querySelector('[class*="userRow"]');
+	          var userHost = uu.el.getAttribute(HOST_ATTR) !== null
+	            ? uu.el
+	            : (innerRow !== null && innerRow.getAttribute(HOST_ATTR) !== null ? innerRow : null);
+	          if (userHost === null) injectAvatar(uu.el, true);
+	          else shiftForAvatar(userHost, true);
 	        } else if (uu.kind === "flow" && uu.tech !== null) {
 	          // 技术条目（系统提示词/上下文注入）：不插头像、不改显隐
 	          shiftForAvatar(uu.el, false);
 	        }
 	      }
-	      // 每组头像先挂组首块（高度校验延后到下一帧），多余的头像一律移除——收敛式，自愈流式/容器重组残留
+	      // 宿主定位：每轮只定位一次并锁定；**空块一律不挂**（没文字 = 用户看不见，
+	      // 挂上去就是「昵称悬空、中间空一行」）。锁定后不再搬，避免流式期间上下跳。
+	      // 稳态零布局读取：确认过「有可见文字」的块记进 textSeen，之后不再读 innerText。
+	      var anyUnresolved = false;
 	      for (var g = 0; g < groups.length; g++) {
-	        var host = groups[g].length > 0 ? groups[g][0] : null;
-	        if (host !== null) pendingFix.push({ group: groups[g], el: host.el });
+	        var host = null;
+	        var hostIdx = -1;
+	        var firstVis = null;
+	        var firstVisIdx = -1;
+	        var firstBody = null;
+	        var firstBodyIdx = -1;
+	        for (var hp = 0; hp < groups[g].length; hp++) {
+	          var mem = groups[g][hp];
+	          var memEl = mem.el;
+	          var isRun = memEl.getAttribute(RUN_MARK) !== null;
+	          // 必须有**实际盒子**（高度 > 0）才是可挂宿主：
+	          // “上下文注入”这类过程包裹层经常 height=0、内容在别处渲染，
+	          // 挂上去伪元素会被裁掉 → 整轮看不到头像（实测）。
+	          var boxOk = false;
+	          try { boxOk = memEl.getBoundingClientRect().height > 0; } catch (eBox) { boxOk = false; }
+	          var hasText = textSeen.has(memEl);
+	          if (!hasText) {
+	            var memText = "";
+	            try { memText = (memEl.innerText || "").trim(); } catch (eT) { memText = ""; }
+	            if (memText.length > 0) { textSeen.add(memEl); hasText = true; }
+	          }
+	          if (memEl.getAttribute(HOST_ATTR) !== null && hostIdx === -1) { host = mem; hostIdx = hp; }
+	          if (hasText && boxOk && firstVis === null) { firstVis = mem; firstVisIdx = hp; }
+	          if (hasText && boxOk && !isRun && firstBody === null) { firstBody = mem; firstBodyIdx = hp; }
+	        }
+	        // 只允许「向上」修正：锁定的宿主比第一个可见正文块更靠后时，挪到前面那个。
+	        // 绝不向下挪 —— 向下会让昵称跟着内容出现往下跳。
+	        if (host === null) {
+	          host = firstBody !== null ? firstBody : firstVis;
+	        } else if (firstBody !== null && firstBodyIdx < hostIdx) {
+	          host = firstBody;
+	        } else if (host.el.getAttribute(RUN_MARK) !== null && firstBody !== null) {
+	          // 运行行只是开场临时宿主：组内出现可见正文块就升级
+	          host = firstBody;
+	        }
+	        if (host === null) { anyUnresolved = true; continue; }
 	        for (var k = 0; k < groups[g].length; k++) {
 	          var blk = groups[g][k].el;
 	          shiftForAvatar(blk, false);
-	          var hasAv = !!blk.querySelector("[" + AV_MARK + "]");
+	          var hasAv = blk.getAttribute(HOST_ATTR) !== null;
 	          if (host !== null && blk === host.el) {
-	            if (!hasAv) {
-	              injectAvatar(blk, false);
-	              var a = blk.querySelector("[" + AV_MARK + "]");
-	              if (a) a.setAttribute("data-ziyong-ai", "1");
-	            }
+	            if (!hasAv) injectAvatar(blk, false);
 	          } else if (hasAv) {
 	            removeAvatar(blk);
 	          }
 	        }
 	      }
-	      // 下一帧校验宿主高度：0 高度幽灵块（折叠/过渡中的空块）把头像挪到组内
-	      // 第一个有高度的块。rAF 在绘制之前执行，用户看不到中间态。
-	      if (pendingFix.length > 0) {
-	        requestAnimationFrame(function () {
-	          for (var fx = 0; fx < pendingFix.length; fx++) {
-	            var item = pendingFix[fx];
-	            var hostEl = item.el;
-	            if (hostEl === null || hostEl === void 0 || hostEl.isConnected !== true) continue;
-	            if (hostEl.offsetHeight > 0) continue;
-	            var next = null;
-	            for (var fj = 1; fj < item.group.length; fj++) {
-	              var cand = item.group[fj].el;
-	              if (cand.isConnected === true && cand.offsetHeight > 0) { next = cand; break; }
-	            }
-	            if (next === null) { removeAvatar(hostEl); continue; }
-	            removeAvatar(hostEl);
-	            shiftForAvatar(next, false);
-	            injectAvatar(next, false);
-	            var moved = next.querySelector("[" + AV_MARK + "]");
-	            if (moved !== null) moved.setAttribute("data-ziyong-ai", "1");
-	          }
-	        });
-	      }
+	      if (anyUnresolved === true) scheduleRecheck(container);
 	    }
 
 	    /**
@@ -387,7 +427,27 @@ function nameEl(text, isUser) {
 	      tag.dataset.plugin = "dsh-avatar";
 	      tag.dataset.pluginCss = "dsh-avatar/flow.css";
 	      tag.textContent = "[data-chat-running]{display:flex;flex-direction:column;min-height:calc(var(--dsh-avatar-size,40px) + 2px)}" +
-	        "[data-chat-running] [class*=\"runningContent\"]{margin-top:auto}";
+	        "[data-chat-running] [class*=\"runningContent\"]{margin-top:auto}" +
+	        // ── 方案 B：头像/昵称全靠属性 + 伪元素渲染，不建 DOM 节点 ──
+	        // 让位缩进（属性驱动，React 重渲染不会清属性）
+	        "[data-ziyong-ai-shift]{position:relative;padding-left:calc(var(--zy-size,40px) + 12px)}" +
+	        "[data-ziyong-user-shift]{position:relative;padding-right:calc(var(--zy-size,40px) + 12px)}" +
+	        // 通用宿主（默认给昵称留 16px，用户消息用）
+	        "[data-zy-av]{position:relative;padding-top:16px}" +
+	        "[data-zy-av]::before{content:var(--zy-letter,\"\");position:absolute;top:2px;width:var(--zy-size,40px);height:var(--zy-size,40px);display:flex;align-items:center;justify-content:center;background-color:var(--zy-bg,transparent);background-image:var(--zy-url,none);background-size:cover;background-position:center;clip-path:inset(0 round var(--zy-round,20px));color:#fff;font-size:var(--zy-font,18px);font-weight:600;overflow:hidden}" +
+	        "[data-zy-av]::after{content:attr(data-zy-name);position:absolute;top:0;left:0;right:0;height:16px;line-height:16px;font-size:12px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;pointer-events:none}" +
+	        // AI：昵称画在块上方的 16px 间距里，不额外占块内高度（避免多出一条空白）
+	        "[data-zy-av=\"ai\"]{padding-top:0}" +
+	        "[data-zy-av=\"ai\"]::before{top:calc(var(--zy-dy,0px) - 14px);left:0}" +
+	        "[data-zy-av=\"ai\"]::after{top:calc(var(--zy-dy,0px) - 16px);text-align:left;padding-left:calc(var(--zy-size,40px) + 12px)}" +
+	        // 用户：昵称在块内顶部 16px 预留区，头像贴右
+	        "[data-zy-av=\"user\"]::before{top:2px;right:0}" +
+	        "[data-zy-av=\"user\"]::after{text-align:right;padding-right:calc(var(--zy-size,40px) + 12px)}" +
+	        // 运行行宿主：撑到容纳头像，状态行内容贴底
+	        "[data-zy-run]{display:flex;flex-direction:column;min-height:calc(var(--zy-size,40px) + 2px)}" +
+	        "[data-zy-run] [class*=\"runningContent\"]{margin-top:auto}" +
+	        // 用户消息气泡去掉背景（原内联样式改 CSS，React 重渲染也不丢）
+	        "[data-zy-av=\"user\"] [class*=\"bubble\"]{background:transparent!important;border:none!important;border-radius:0!important;padding:0!important}";
 	      document.head.appendChild(tag);
 	    }
 	    /** 头像尺寸写进 CSS 变量：只作「运行中状态行第一帧」的 min-height 兜底。
@@ -566,7 +626,7 @@ function nameEl(text, isUser) {
 	          for (var i = 0; i < hosts.length; i++) {
 	            var h = hosts[i];
 	            if (h === null || h.isConnected !== true) return false;
-	            if (h.querySelector("[" + AV_MARK + "]") === null) return false;
+	            if (h.getAttribute(HOST_ATTR) === null) return false;
 	          }
 	          return true;
 	        };
@@ -583,7 +643,7 @@ function nameEl(text, isUser) {
 	            // 才逐个校验宿主是否还在、头像是否还在——那边每 2s 才跑一次。
 	            var ok = strict === true
 	              ? hostsValid(st)
-	              : container.isConnected === true && container.querySelectorAll("[" + AV_MARK + "]").length === st.hosts.length;
+	              : container.isConnected === true && container.querySelectorAll("[" + HOST_ATTR + "]").length === st.hosts.length;
 	            if (ok) return;
 	          }
 	          scanContainer(container);
@@ -591,7 +651,7 @@ function nameEl(text, isUser) {
 	            n: ch.length,
 	            first: first,
 	            last: last,
-	            hosts: Array.prototype.slice.call(container.querySelectorAll("[" + AV_MARK + "]"))
+	            hosts: Array.prototype.slice.call(container.querySelectorAll("[" + HOST_ATTR + "]"))
 	          });
 	        };
 	        // 整块挂载兜底：切会话 / 从插件页切回 时，整个会话树是一次性插入的，
@@ -627,7 +687,7 @@ function nameEl(text, isUser) {
 	              if (row === null || row === void 0) row = node.closest('[class*="userRow"]');
 	            }
 	            if (row === null || row === void 0) return;
-	            if (row.querySelector("[" + AV_MARK + "]") !== null) return;
+	            if (row.getAttribute(HOST_ATTR) !== null) return;
 	            injectAvatar(row, true);
 	          } catch (e) { /* 补头像失败不影响其余 */ }
 	        };
@@ -723,6 +783,11 @@ function nameEl(text, isUser) {
 		        };
 	        scan();
 		new MutationObserver(scanDirty).observe(document.body, { childList: true, subtree: true });
+	        // 启动竞态兜底：会话树可能在观察者挂上之前就已经挂载（插件加载慢于界面首帧），
+	        // 首扫会扫到空容器、之后又没有 mutation 触发 → 整屏没有头像。
+	        // 这里补两次延迟扫描：一次覆盖首屏渲染，一次覆盖懒加载历史。
+	        setTimeout(function () { try { scan(); } catch (eDelay) { /* 忽略 */ } }, 600);
+	        setTimeout(function () { try { scan(); } catch (eDelay2) { /* 忽略 */ } }, 2000);
 	      });
 	    }
 
@@ -1059,6 +1124,15 @@ function nameEl(text, isUser) {
 	    }
 	    // 昵称/头像变化后刷新所有已注入行（头像+昵称+让位样式一起清）
 	    function refreshLines() {
+	      // 方案 B：先摘掉属性标记（伪元素随之消失），再整体重扫重建
+	      var marked = document.querySelectorAll("[" + HOST_ATTR + "], [" + AI_SHIFT + "], [" + USER_SHIFT + "]");
+	      for (var mi = 0; mi < marked.length; mi++) {
+	        marked[mi].removeAttribute(HOST_ATTR);
+	        marked[mi].removeAttribute(NAME_ATTR);
+	        marked[mi].removeAttribute(RUN_ATTR);
+	        marked[mi].removeAttribute(AI_SHIFT);
+	        marked[mi].removeAttribute(USER_SHIFT);
+	      }
 	      var nodes = document.querySelectorAll("[" + AV_MARK + "], [" + NAME_MARK + "]");
 	      for (var i = 0; i < nodes.length; i++) nodes[i].remove();
 	      var boxes = document.querySelectorAll("[" + BOX_MARK + "]");
