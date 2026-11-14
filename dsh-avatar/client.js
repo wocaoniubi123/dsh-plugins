@@ -820,10 +820,13 @@ function nameEl(text, isUser) {
 	          try {
 	            if (root === null || root === void 0 || root.nodeType !== 1) return;
 	            if (typeof root.querySelector !== "function") return;
+	            // 外层已经是宿主（flowItem 先挂上了）：里面再挂就是双倍缩进/双头像
+	            if (typeof root.closest === "function" && root.closest("[" + HOST_ATTR + "]") !== null) return;
 	            if (root.querySelector('[class*="flowItem"]') !== null) return;
 	            var rows = root.querySelectorAll('[class*="userRow"], [data-chat-flow-kind="user"]');
 	            for (var ri = 0; ri < rows.length && ri < 4; ri++) {
 	              if (rows[ri].getAttribute(HOST_ATTR) !== null) continue;
+	              if (typeof rows[ri].closest === "function" && rows[ri].closest("[" + HOST_ATTR + "]") !== null) continue;
 	              injectAvatar(rows[ri], true);
 	            }
 	          } catch (eRows) { /* 忽略 */ }
