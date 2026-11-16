@@ -232,10 +232,41 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
   }
   function markPanelNav() {
     try {
-      if (document.querySelector("nav[" + NAV_MARK + "]") !== null) return;
+      var marked = document.querySelector("nav[" + NAV_MARK + "]");
+      if (marked !== null) { applyNavBg(marked); return; }
       var nav = findPanelNav();
-      if (nav !== null) nav.setAttribute(NAV_MARK, "");
+      if (nav !== null) {
+        nav.setAttribute(NAV_MARK, "");
+        applyNavBg(nav);
+      }
     } catch (e) { /* 打标失败不影响其它功能 */ }
+  }
+  // 置顶导航需要不透明底色：找最近一层有实色背景的祖先（侧栏根），把颜色存到
+  // --dst-nav-bg 上。主题切换/侧栏重建后由 watchPanelNav 的兜底 tick 重新补。
+  function applyNavBg(nav) {
+    try {
+      if (nav === null || nav === void 0) return;
+      if (nav.style.getPropertyValue("--dst-nav-bg") === "") {
+        var p = nav.parentElement;
+        while (p !== null && p !== void 0 && p !== document.body) {
+          var bg = getComputedStyle(p).backgroundColor;
+          if (bg !== "" && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") {
+            nav.style.setProperty("--dst-nav-bg", bg);
+            break;
+          }
+          p = p.parentElement;
+        }
+      }
+      // 置顶偏移 = 未滚动时 nav 与滚动容器顶边的距离。
+      // 用 0 会让置顶瞬间上跳 8px（实测「上划下滑还在动」就是这个），
+      // 这里量一次存进 --dst-nav-top，滚动全程位置纹丝不动。
+      if (nav.style.getPropertyValue("--dst-nav-top") === "" && nav.parentElement !== null && nav.parentElement.scrollTop === 0) {
+        var nr = nav.getBoundingClientRect();
+        var pr = nav.parentElement.getBoundingClientRect();
+        var gap = Math.round(nr.top - pr.top);
+        if (gap >= 0 && gap <= 32) nav.style.setProperty("--dst-nav-top", gap + "px");
+      }
+    } catch (e) { /* 取不到就退回 CSS 默认值 */ }
   }
   function watchPanelNav() {
     if (typeof document === "undefined" || typeof MutationObserver === "undefined" || !document.body) {
@@ -372,7 +403,13 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       var actions = document.querySelector(".dst_headerActions");
       if (actions !== null && actions.classList) actions.classList.remove("dst_headerActions");
       var navs = document.querySelectorAll("nav[" + NAV_MARK + "]");
-      for (var i = 0; i < navs.length; i++) navs[i].removeAttribute(NAV_MARK);
+      for (var i = 0; i < navs.length; i++) {
+        navs[i].removeAttribute(NAV_MARK);
+        if (navs[i].style !== void 0 && typeof navs[i].style.removeProperty === "function") {
+          navs[i].style.removeProperty("--dst-nav-bg");
+          navs[i].style.removeProperty("--dst-nav-top");
+        }
+      }
       var styles = document.querySelectorAll('style[data-plugin="dsh-session-tools"]');
       for (var j = 0; j < styles.length; j++) styles[j].remove();
     } catch (e) { /* 清理失败不阻塞停用流程 */ }
@@ -460,6 +497,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
       "[data-dst-nav] > *{box-sizing:border-box!important;flex:1 1 calc(50% - 1px)!important;max-width:calc(50% - 1px)!important;min-width:0!important}" +
       "[data-dst-nav] button{height:28px!important;min-height:28px!important;padding:4px 8px!important;box-sizing:border-box!important}" +
       "[data-dst-nav] button span{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}" +
+      // 导航区块常驻置顶：会话列表往下滚时，「插件/插件市场/自动化任务/工具管理/会话管理/更多」
+      // 这一块贴住滚动区顶部。背景取侧栏底色（主题变量缺失时回退 #1b1b1c），避免透出下面的会话行。
+      "[data-dst-nav]{position:sticky!important;top:var(--dst-nav-top,8px)!important;z-index:6!important;padding-bottom:8px!important;background:var(--dst-nav-bg,var(--dsw-alias-bg-layer-1,#1b1b1c))!important;box-shadow:0 -8px 0 var(--dst-nav-bg,var(--dsw-alias-bg-layer-1,#1b1b1c)),0 1px 0 rgba(255,255,255,.06)!important}" +
       // 侧栏「会话管理」入口（勾选后由 JS 插入，纯 DOM 节点，不吃官方类名）
       ".dst_navEntry{display:flex;align-items:center;gap:6px;width:100%;height:28px;padding:4px 8px;box-sizing:border-box;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;cursor:pointer;text-align:left;min-width:0}" +
       ".dst_navEntry:hover{background:var(--dsw-alias-interactive-bg-hover)}" +
