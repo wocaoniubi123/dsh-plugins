@@ -360,8 +360,24 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     } catch (e) { /* 注入失败不影响其它功能 */ }
   }
 
-  function installStyles(force) {
-    if (typeof document === "undefined") return;
+  // 插件停用/卸载时清理本插件写进 DOM 的东西：侧栏入口、批量按钮、导航标记、样式。
+  // 只动带本插件标记的节点，不碰 React 管理的原生结构。
+  function disposePluginDom() {
+    try {
+      if (typeof document === "undefined") return;
+      var entry = document.querySelector("[" + SIDEBAR_ENTRY_MARK + "]");
+      if (entry !== null) entry.remove();
+      var batch = document.querySelector("[" + BATCH_MARK + "]");
+      if (batch !== null) batch.remove();
+      var actions = document.querySelector(".dst_headerActions");
+      if (actions !== null && actions.classList) actions.classList.remove("dst_headerActions");
+      var navs = document.querySelectorAll("nav[" + NAV_MARK + "]");
+      for (var i = 0; i < navs.length; i++) navs[i].removeAttribute(NAV_MARK);
+      var styles = document.querySelectorAll('style[data-plugin="dsh-session-tools"]');
+      for (var j = 0; j < styles.length; j++) styles[j].remove();
+    } catch (e) { /* 清理失败不阻塞停用流程 */ }
+  }
+  function installStyles(force) {    if (typeof document === "undefined") return;
     var existing = document.querySelector("style[data-plugin-css=" + JSON.stringify("dsh-session-tools/section.css") + "]");
     if (existing !== null && force !== true) return;
     if (existing !== null) existing.remove();
@@ -1213,6 +1229,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
     sidebarEntryLabelFn = function () { return t("navEntry"); };
     ctx.effect(installStyles, "dsh-session-tools: styles");
     ctx.effect(watchPanelNav, "dsh-session-tools: sidebar nav anchor");
+    // 停用/卸载时把本插件插入的 DOM 一并撤掉（侧栏入口、批量按钮、导航标记、样式）
+    ctx.effect(function () { return disposePluginDom; }, "dsh-session-tools: dom cleanup");
     // 兼容开关：启动时读 host 的 compat.json；关闭时重建样式（不再输出 .dig-* 覆盖）
     wireCall("sessionTools", "getCompat", {}).then(function (value) {
       var on = !(value && value.dedig === false);

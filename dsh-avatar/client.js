@@ -631,22 +631,69 @@ function nameEl(text, isUser) {
 	        var wrap = more.parentElement;
 	        if (wrap === null) return;
 	        if (explorerBtnEl === null || explorerBtnEl.isConnected !== true) {
-	          explorerBtnEl = document.createElement("button");
-	          explorerBtnEl.type = "button";
-	          explorerBtnEl.className = "zy_explorerBtn";
-	          explorerBtnEl.title = "资源管理器";
-	          explorerBtnEl.setAttribute("aria-label", "资源管理器");
-	          explorerBtnEl.textContent = "📂";
-	          explorerBtnEl.addEventListener("click", function (ev) {
-	            ev.preventDefault();
-	            ev.stopPropagation();
-	            openCurrentWorkspace();
-	          });
+	          // 插件重启/热更后旧按钮可能还留在 DOM：先认领，避免越插越多
+	          var adopted = wrap.querySelector('button[aria-label="资源管理器"]');
+	          if (adopted === null) adopted = document.querySelector('button[aria-label="资源管理器"]');
+	          if (adopted !== null) {
+	            explorerBtnEl = adopted;
+	          } else {
+	            explorerBtnEl = document.createElement("button");
+	            explorerBtnEl.type = "button";
+	            explorerBtnEl.className = "zy_explorerBtn";
+	            explorerBtnEl.title = "资源管理器";
+	            explorerBtnEl.setAttribute("aria-label", "资源管理器");
+	            explorerBtnEl.textContent = "📂";
+	            explorerBtnEl.addEventListener("click", function (ev) {
+	              ev.preventDefault();
+	              ev.stopPropagation();
+	              openCurrentWorkspace();
+	            });
+	          }
+	        }
+	        // 清掉重复的同名按钮（重启/多实例残留），只留当前这一个
+	        var allBtns = document.querySelectorAll('button[aria-label="资源管理器"]');
+	        for (var bi = 0; bi < allBtns.length; bi++) {
+	          if (allBtns[bi] !== explorerBtnEl) allBtns[bi].remove();
 	        }
 	        if (explorerBtnEl.parentElement !== wrap || explorerBtnEl.nextElementSibling !== more) {
 	          wrap.insertBefore(explorerBtnEl, more);
 	        }
 	      } catch (e) { /* 忽略 */ }
+	    }
+
+	    // 插件停用/卸载时清理本插件写进 DOM 的东西：头像属性、缩进标记、内联变量、
+	    // 资源管理器按钮、导航图标标记、插件样式。只认本插件标记，不碰 React 属主节点。
+	    function disposeAvatarDom() {
+	      try {
+	        if (typeof document === "undefined") return;
+	        var marked = document.querySelectorAll("[" + HOST_ATTR + "], [" + AI_SHIFT + "], [" + USER_SHIFT + "], [" + RUN_ATTR + "], [" + RUN_MARK + "], [" + BOX_MARK + "], [" + AV_MARK + "], [" + NAME_MARK + "]");
+	        for (var i = 0; i < marked.length; i++) {
+	          var el = marked[i];
+	          el.removeAttribute(HOST_ATTR);
+	          el.removeAttribute(NAME_ATTR);
+	          el.removeAttribute(RUN_ATTR);
+	          el.removeAttribute(AI_SHIFT);
+	          el.removeAttribute(USER_SHIFT);
+	          el.removeAttribute(RUN_MARK);
+	          el.removeAttribute(BOX_MARK);
+	          el.removeAttribute(AV_MARK);
+	          el.removeAttribute(NAME_MARK);
+	          if (el.style !== void 0 && el.style !== null && typeof el.style.removeProperty === "function") {
+	            el.style.removeProperty("--zy-size");
+	            el.style.removeProperty("--zy-round");
+	            el.style.removeProperty("--zy-font");
+	            el.style.removeProperty("--zy-url");
+	            el.style.removeProperty("--zy-letter");
+	            el.style.removeProperty("--zy-dy");
+	          }
+	        }
+	        var icons = document.querySelectorAll("svg[" + ICON_MARK + "]");
+	        for (var j = 0; j < icons.length; j++) icons[j].removeAttribute(ICON_MARK);
+	        if (explorerBtnEl !== null && explorerBtnEl.isConnected === true) explorerBtnEl.remove();
+	        explorerBtnEl = null;
+	        var styles = document.querySelectorAll('style[data-plugin="dsh-avatar"]');
+	        for (var k = 0; k < styles.length; k++) styles[k].remove();
+	      } catch (e) { /* 清理失败不阻塞停用流程 */ }
 	    }
 
 	    // 消息流头像的全局样式：**提前在场**，让「运行中」状态行的位置第一帧就是最终位置
@@ -1508,6 +1555,8 @@ function nameEl(text, isUser) {
 	      ctx.effect(function () {
 	        return ctx.locale.register(NS, { zh: ZH, en: EN });
 	      }, "dsh-avatar: dictionaries");
+	      // 停用/卸载时撤掉本插件插入的节点与属性（含 📂 按钮与样式）
+	      ctx.effect(function () { return disposeAvatarDom; }, "dsh-avatar: dom cleanup");
 	      ctx.slots.inject("settings.section", function () {
 	        return ctx.slots.register({
 	          name: "settings.section",
