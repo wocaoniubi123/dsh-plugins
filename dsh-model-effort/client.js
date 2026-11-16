@@ -101,6 +101,9 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
   // key = "provider:modelId"。选模型时先读记忆档位，没有记录才顶格；
   // 手动改档位 / 首次顶格都会回写。内存缓存 + 异步落盘。
   var EFFORT_MEMORY = null;
+  // 团队模式自动开启去重：sessionId → true（本插件运行期内只自动开一次，
+  // 手动关掉后不会被反复打开）
+  var teamAutoSeen = {};
   function memoryKey(providerId, modelId) {
     return providerId + ":" + modelId;
   }
@@ -444,6 +447,34 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
     (0, React.useEffect)(function () {
       if (open) load();
     }, [open]);
+    // 智能体团队协作（官方开关，会话级）：官方挂在模型菜单底部
+    // （slot conversation.input.model.options）。影子胶囊接管后官方菜单不渲染，
+    // 这里按官方位置补在档位滑块下方。hook 必须放在早退之前，保持调用顺序稳定。
+    var team = null;
+    try {
+      if (typeof props.useProjection === "function") {
+        team = props.useProjection("agentTeam");
+      } else if (typeof props.useSessions === "function") {
+        team = props.useSessions(function (st) {
+          var cell = st && st.projectionsBySession ? st.projectionsBySession[props.sessionId] : null;
+          return cell && cell.values ? cell.values.agentTeam : null;
+        });
+      }
+    } catch (eTeam) { team = null; }
+    var teamLocalState = (0, React.useState)(null);
+    // 默认开启团队协作：主会话挂载时若投影为关，自动打开一次。
+    // 每个会话每次运行只尝试一次；手动关掉后不会被反复顶回。
+    (0, React.useEffect)(function () {
+      try {
+        if (available !== true) return;
+        if (props.sessionId === void 0 || props.sessionId === "") return;
+        if (team === null || team === void 0) return;
+        if (teamAutoSeen[props.sessionId] === true) return;
+        teamAutoSeen[props.sessionId] = true;
+        if (team.enabled === true) return;
+        if (typeof props.setTeamMode === "function") props.setTeamMode(true);
+      } catch (eTeamAuto) { /* 忽略 */ }
+    }, [available, props.sessionId, team === null || team === void 0 ? null : team.enabled === true]);
     if (!available) return null;
     var busy = state.status === "selecting";
     var current = state.current;
@@ -469,6 +500,20 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
       if (!known) effective = levels[levels.length - 1].id;
     }
     var effortText = effortLabel(effective);
+    var teamEnabled = team !== null && team !== void 0 && team.enabled === true;
+    var teamLocal = teamLocalState[0];
+    var setTeamLocal = teamLocalState[1];
+    var teamShown = teamLocal !== null && teamLocal !== void 0 ? teamLocal : teamEnabled;
+    function onTeamChange(next) {
+      var want = next === true;
+      setTeamLocal(want);
+      try {
+        var call = props.setTeamMode(want);
+        if (call && typeof call.then === "function") {
+          call.then(function (ok) { if (ok !== true) setTeamLocal(null); }, function () { setTeamLocal(null); });
+        }
+      } catch (eCall) { setTeamLocal(null); }
+    }
 
     var items = [];
     var selMap = {};
@@ -528,22 +573,46 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
       saveEffortMemory(current.provider, current.model, id);
       select({ provider: current.provider, model: current.model, reasoningEffort: id }).catch(function () { });
     }
-    // 菜单底部：当前模型 + 思考强度滑块（模型没声明档位时整块不出现）。
-    var footer = levels.length > 0 ? h("div", { className: "dsme_footer" },
+    // 菜单底部：当前模型 + 思考强度滑块（模型没声明档位时滑块不出现）；
+    // 最下方是「启用智能体团队协作」开关（官方位置在模型菜单底部，这里对齐）。
+    var SwitchPrimitive = _deepseek_ai_dsh_client_ui_primitives.Switch;
+    var teamRow = h("div", { className: "dsme_team" },
+      h("span", { className: "dsme_teamLabel" }, "启用智能体团队协作"),
+      typeof SwitchPrimitive === "function"
+        ? h(SwitchPrimitive, {
+            checked: teamShown,
+            disabled: busy,
+            label: "启用智能体团队协作",
+            onChange: onTeamChange
+          })
+        : h("button", {
+            type: "button",
+            role: "switch",
+            "aria-checked": teamShown ? "true" : "false",
+            "aria-label": "启用智能体团队协作",
+            className: "dsme_teamSwitch" + (teamShown ? " dsme_teamOn" : ""),
+            disabled: busy,
+            onClick: function () { onTeamChange(!teamShown); }
+          }, h("span", { className: "dsme_teamThumb" }))
+    );
+    var footer = h("div", { className: "dsme_footer" },
       h("div", { className: "dsme_div" }),
       h("div", { className: "dsme_cur" },
         h("span", { className: "dsme_curLabel" }, "模型"),
         h("span", { className: "dsme_curName" }, modelLabel)
       ),
-      h("div", { className: "dsme_effhead" },
-        h("span", null, "思考强度"),
-        h("span", {
-          className: effective === "max" ? "dsme_grad" : "",
-          style: { color: effortColor(effective), fontWeight: 500 }
-        }, effortText || "默认")
-      ),
-      h(EffortSlider, { levels: levels, value: effective, disabled: busy, onCommit: commitEffort })
-    ) : null;
+      levels.length > 0 ? h("div", { className: "dsme_eff" },
+        h("div", { className: "dsme_effhead" },
+          h("span", null, "思考强度"),
+          h("span", {
+            className: effective === "max" ? "dsme_grad" : "",
+            style: { color: effortColor(effective), fontWeight: 500 }
+          }, effortText || "默认")
+        ),
+        h(EffortSlider, { levels: levels, value: effective, disabled: busy, onCommit: commitEffort })
+      ) : null,
+      teamRow
+    );
 
     return h("span", { style: { position: "relative", display: "inline-flex", flex: "none" } },
       h(_deepseek_ai_dsh_client_ui_primitives.Menu, {
@@ -1352,11 +1421,18 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
         'div[role="menu"]:has(.dsme_footer) button[role="menuitem"] svg[data-icon="dsw-icon-check-outline-regular"]{display:none}',
         'div[role="menu"]:has(.dsme_footer) button[role="menuitem"]:has(svg[data-icon="dsw-icon-check-outline-regular"])::after{content:"✅";font-size:12px;line-height:16px;margin-left:auto;flex:none}',
         // 菜单底部「当前模型 + 档位滑块」——挂在官方 Menu 的 children 里，材质/圆角由官方管。
-        ".dsme_footer{padding:0 2px 4px;min-width:216px}",
+        ".dsme_footer{padding:0 2px 4px;min-width:200px;box-sizing:border-box;max-width:100%;width:100%;overflow-x:hidden}",
         ".dsme_div{height:1px;background:var(--dsw-alias-border-l1,rgba(128,128,128,.25));margin:4px 6px 6px}",
         ".dsme_cur{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,inherit)}",
         ".dsme_curName{color:var(--dsw-alias-label-primary,inherit);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}",
         ".dsme_effhead{display:flex;align-items:center;justify-content:space-between;padding:2px 8px 0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,inherit)}",
+        // 滑块下方的「启用智能体团队协作」：与官方菜单底部同位置、同行左标签右开关
+        ".dsme_team{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 2px;font-size:12px;line-height:18px;box-sizing:border-box;max-width:100%;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-primary,inherit))}",
+        ".dsme_teamLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+        ".dsme_teamSwitch{position:relative;flex:none;width:36px;height:20px;border-radius:10px;border:none;padding:0;cursor:pointer;background:var(--dsw-alias-bg-layer-3,rgba(128,128,128,.35));transition:background .12s ease}",
+        ".dsme_teamOn{background:var(--dsw-alias-state-business-primary,var(--dsw-alias-brand-primary,#3b82f6))}",
+        ".dsme_teamThumb{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .12s ease}",
+        ".dsme_teamOn .dsme_teamThumb{left:18px}",
         ".dsme_slider{position:relative;height:38px;margin:2px 8px 4px;cursor:pointer;touch-action:none;outline:none}",
         ".dsme_slider:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));border-radius:10px}",
         ".dsme_track{position:absolute;left:0;right:0;top:50%;height:16px;margin-top:-8px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.22));overflow:hidden}",
@@ -1402,8 +1478,9 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
 
     // 模型胶囊（session 作用域）：输入框只留这一枚，档位并入它的面板。
     // 独立的思考胶囊（conversation.input.right）已按用户要求删除。
-    ctx.inject(["slots", "modelDirectories"], function (mctx) {
+    ctx.inject(["slots", "modelDirectories", "remote.agentTeams"], function (mctx) {
       var models = mctx.modelDirectories;
+      var agentTeams = mctx.remote !== void 0 && mctx.remote !== null ? mctx.remote.agentTeams : void 0;
       // 模型选择器影子注册（priority -1 遮蔽官方 seat，接管成「模型 + 档位」胶囊）。
       ctx.slots.inject("conversation.input.model", function () {
         return ctx.slots.register({
@@ -1415,6 +1492,14 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
             var available = mctx.sessions.subagentAddress(sessionId) === void 0;
             return {
               available: available,
+              sessionId: sessionId,
+              // 官方开关动作：remote.agentTeams.setEnabled(sessionId, enabled)
+              setTeamMode: function (enabled) {
+                if (agentTeams === void 0 || agentTeams === null || typeof agentTeams.setEnabled !== "function") return Promise.resolve(false);
+                return Promise.resolve(agentTeams.setEnabled(sessionId, enabled === true)).then(function (response) {
+                  return response !== null && response !== void 0 && response.ok === true;
+                }, function () { return false; });
+              },
               directory: directory.store,
               load: function () { directory.load().catch(function () {}); },
               select: function (selection) { return directory.select(selection).then(function () { return true; }, function () { return false; }); }
@@ -1432,7 +1517,7 @@ window.__ModuleLoader__.load({ id: "dsh-model-effort", factory: (require) => {
   // 少声明会报 "cannot get property remote.session without inject"。
   // settingsScope/configForms：懒注入（见 apply 内注释），不写进声明——新版内核没有
   // settingsScope，声明会让整个 client 插件永远 pending。
-  exports.inject = ["slots", "locale", "modelDirectories", "remote", "remote.session", "sessions"];
+  exports.inject = ["slots", "locale", "modelDirectories", "remote", "remote.session", "remote.agentTeams", "sessions"];
   return module.exports;
 }});
 
