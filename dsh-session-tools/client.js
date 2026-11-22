@@ -1444,11 +1444,30 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
                   return;
                 }
                 if (actionId === "openExplorer") {
-                  var target = request.path;
-                  if (typeof target !== "string" || target.length === 0) return;
+                  // 期望：打开「工作区」目录本身。
+                  // 旧实现用 request.path（会话 cwd）+ action:"reveal" → 语义是
+                  // 「在父目录中选中」，看起来就是打开了上一层。这里先解析工作区根，
+                  // 再不带 action 调用（直接打开该目录）。
+                  var workspaceTarget = null;
+                  try {
+                    var wsSummary = ctx.sessions.list.getSnapshot().byId[sessionId];
+                    if (wsSummary !== void 0 && wsSummary !== null && typeof wsSummary.workspaceId === "string" && wsSummary.workspaceId.length > 0) {
+                      var wsSnap = ctx.workspaces.list.getSnapshot();
+                      var wsItems = wsSnap !== null && wsSnap !== void 0 && Array.isArray(wsSnap.items) ? wsSnap.items : [];
+                      for (var wi = 0; wi < wsItems.length; wi++) {
+                        var ws = wsItems[wi];
+                        if (ws !== null && ws !== void 0 && ws.workspaceId === wsSummary.workspaceId && typeof ws.path === "string" && ws.path.length > 0) {
+                          workspaceTarget = ws.path;
+                          break;
+                        }
+                      }
+                    }
+                  } catch (eWs) { workspaceTarget = null; }
+                  var openTarget = workspaceTarget !== null ? workspaceTarget : request.path;
+                  if (typeof openTarget !== "string" || openTarget.length === 0) return;
                   var remoteSession = ctx.get("remote.session");
                   if (remoteSession === void 0 || typeof remoteSession.openWorkspacePath !== "function") return;
-                  Promise.resolve(remoteSession.openWorkspacePath({ path: target, action: "reveal" })).catch(function (reason) {
+                  Promise.resolve(remoteSession.openWorkspacePath({ path: openTarget })).catch(function (reason) {
                     if (typeof console !== "undefined") console.warn("dsh-session-tools: open explorer failed:", reason);
                   });
                   return;
