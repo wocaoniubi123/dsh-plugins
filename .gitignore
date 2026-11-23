@@ -5,3 +5,9 @@ _bak/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 插件运行时落盘的用户配置（每改一次设置就变，不该进仓库）
+dsh-avatar/config.json
+dsh-model-effort/effort-memory.json
+dsh-model-effort/provider-enabled.json
+dsh-session-tools/compat.json
