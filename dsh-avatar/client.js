@@ -35,6 +35,11 @@ window.__ModuleLoader__.load({
     var EXPLORER_KEY = "dsh-avatar/explorer-button";
     var explorerEnabled = false;
     var explorerBtnEl = null;
+    // 输入框「提示词优化」按钮：勾选后插到模型胶囊左边，点击用当前模型改写输入框文本
+    var POLISH_KEY = "dsh-avatar/prompt-polish";
+    var polishEnabled = false;
+    var polishBtnEl = null;
+    var polishToastEl = null;
     var pluginCtx = null;
 
     function avatarSize() {
@@ -661,6 +666,320 @@ function nameEl(text, isUser) {
 	      } catch (e) { /* 忽略 */ }
 	    }
 
+	    // ── 输入框「提示词优化」按钮 ────────────────────────────
+	    // 勾选后插在模型胶囊左边。点击：读输入框文本 + 当前会话模型 →
+	    // host 侧一次性调用该模型（带最近上下文）→ 结果写回输入框。
+	    function polishFlag() {
+	      try { return localStorage.getItem(POLISH_KEY) === "1"; } catch (e) { return false; }
+	    }
+	    function setPolishFlag(on) {
+	      polishEnabled = on === true;
+	      try { localStorage.setItem(POLISH_KEY, polishEnabled ? "1" : "0"); } catch (e) { /* 忽略 */ }
+	      syncPolishButton();
+	    }
+	    // 输入框是 Lexical 编辑器（div[data-composer-input][contenteditable]）
+	    function findComposerInput() {
+	      try {
+	        var list = document.querySelectorAll('[data-composer-input][contenteditable="true"]');
+	        for (var i = 0; i < list.length; i++) {
+	          var r = list[i].getBoundingClientRect();
+	          if (r.width > 0 && r.height > 0) return list[i];
+	        }
+	      } catch (e) { /* 忽略 */ }
+	      return null;
+	    }
+	    function composerText(el) {
+	      try { return String(el.innerText || "").replace(/\u00a0/g, " ").trim(); } catch (e) { return ""; }
+	    }
+	    // 当前会话模型：projectionsBySession[sessionId].values.modelSelection.next ?? lastUsed
+	    function currentModelRoute() {
+	      try {
+	        if (pluginCtx === null) return null;
+	        var snap = pluginCtx.sessions.list.getSnapshot();
+	        var bySession = snap !== null && snap !== void 0 ? snap.projectionsBySession : null;
+	        if (bySession === null || bySession === void 0) return null;
+	        var entry = bySession[activeSessionId()];
+	        if (entry === void 0 || entry === null || entry.values === void 0 || entry.values === null) return null;
+	        var ms = entry.values.modelSelection;
+	        if (ms === void 0 || ms === null) return null;
+	        var pick = ms.next !== void 0 && ms.next !== null ? ms.next : ms.lastUsed;
+	        if (pick === void 0 || pick === null || typeof pick.model !== "string") return null;
+	        return {
+	          provider: String(pick.provider),
+	          model: String(pick.model),
+	          reasoningEffort: typeof pick.reasoningEffort === "string" ? pick.reasoningEffort : ""
+	        };
+	      } catch (e) { return null; }
+	    }
+	    // 写回 Lexical：优先走编辑器自己的 EditorState（execCommand/input 会被编辑器吞掉），
+	    // 拿不到编辑器实例时退回「全选 + insertText」。
+	    // 换行用 linebreak 叶子节点而不是多个 paragraph：paragraph 之间的段落间距会让
+	    // innerText 把每个 \n 显示成两个，提交内容也随之膨胀。
+	    function polishEditorState(text) {
+	      var lines = String(text).replace(/\r\n/g, "\n").split("\n");
+	      var children = [];
+	      for (var i = 0; i < lines.length; i++) {
+	        if (i > 0) children.push({ type: "linebreak", version: 1 });
+	        if (lines[i].length > 0) {
+	          children.push({ detail: 0, format: 0, mode: "normal", style: "", text: lines[i], type: "text", version: 1 });
+	        }
+	      }
+	      return {
+	        root: {
+	          children: [{
+	            children: children,
+	            direction: "ltr",
+	            format: "",
+	            indent: 0,
+	            type: "paragraph",
+	            version: 1,
+	            textFormat: 0,
+	            textStyle: ""
+	          }],
+	          direction: "ltr",
+	          format: "",
+	          indent: 0,
+	          type: "root",
+	          version: 1
+	        }
+	      };
+	    }
+	    function replaceComposerText(el, text) {
+	      try {
+	        var editor = el.__lexicalEditor;
+	        if (editor !== void 0 && editor !== null &&
+	            typeof editor.parseEditorState === "function" &&
+	            typeof editor.setEditorState === "function") {
+	          var next = editor.parseEditorState(JSON.stringify(polishEditorState(text)));
+	          editor.setEditorState(next);
+	          try { editor.focus(); } catch (eFocus) { /* 聚焦失败不影响内容 */ }
+	          return true;
+	        }
+	      } catch (eLex) { /* 落到 DOM 兜底 */ }
+	      var done = false;
+	      try { el.focus(); } catch (e0) { /* 聚焦失败照常尝试 */ }
+	      try {
+	        var sel = window.getSelection();
+	        var range = document.createRange();
+	        range.selectNodeContents(el);
+	        sel.removeAllRanges();
+	        sel.addRange(range);
+	        done = document.execCommand("insertText", false, text) === true;
+	      } catch (e) { done = false; }
+	      return done;
+	    }
+	    // 失败：按钮红闪 + 气泡提示（气泡是唯一能看到原因的地方，不再只靠 title）
+	    function flashPolish(btn, msg) {
+	      try {
+	        btn.title = msg;
+	        btn.setAttribute("data-zy-error", "1");
+	        setTimeout(function () {
+	          if (btn.isConnected !== true) return;
+	          btn.removeAttribute("data-zy-error");
+	          btn.title = "优化提示词";
+	        }, 3200);
+	      } catch (e) { /* 忽略 */ }
+	      showPolishToast(btn, msg);
+	    }
+	    // 失败时的可见提示：按钮上方一个小气泡，带「重试」，7 秒后自动消失
+	    function showPolishToast(anchor, message) {
+	      try {
+	        if (anchor === null || typeof document === "undefined") return;
+	        if (polishToastEl !== null && polishToastEl.isConnected === true) polishToastEl.remove();
+	        polishToastEl = null;
+	        var wrap = anchor.parentElement;
+	        if (wrap === null) return;
+	        var box = document.createElement("div");
+	        box.className = "zy_polishToast";
+	        var text = document.createElement("span");
+	        text.className = "zy_polishToastText";
+	        text.textContent = message;
+	        var retry = document.createElement("button");
+	        retry.type = "button";
+	        retry.className = "zy_polishToastRetry";
+	        retry.textContent = "重试";
+	        retry.addEventListener("click", function (ev) {
+	          ev.preventDefault();
+	          ev.stopPropagation();
+	          if (box.isConnected === true) box.remove();
+	          if (polishToastEl === box) polishToastEl = null;
+	          polishCurrentInput(anchor);
+	        });
+	        box.appendChild(text);
+	        box.appendChild(retry);
+	        document.body.appendChild(box);
+	        polishToastEl = box;
+	        // 气泡用 fixed 定位：父容器（模型胶囊 root）只有按钮那么宽，relative 定位会被裁
+	        try {
+	          var ar = anchor.getBoundingClientRect();
+	          var cx = ar.left + ar.width / 2;
+	          box.style.left = Math.round(cx) + "px";
+	          box.style.transform = "translateX(-50%)";
+	          var bw = box.offsetWidth;
+	          var bh = box.offsetHeight;
+	          var leftEdge = cx - bw / 2;
+	          var rightEdge = cx + bw / 2;
+	          if (leftEdge < 4) {
+	            box.style.transform = "none";
+	            box.style.left = "4px";
+	          } else if (rightEdge > window.innerWidth - 4) {
+	            box.style.transform = "none";
+	            box.style.left = Math.round(window.innerWidth - bw - 4) + "px";
+	          }
+	          box.style.top = Math.round(ar.top - bh - 8) + "px";
+	        } catch (ePos) { box.style.left = "8px"; box.style.transform = "none"; }
+	        // 10 秒自动消失；点气泡以外任意处也立即消失
+	        var closeToast = function () {
+	          try { clearTimeout(toastTimer); } catch (e) { /* 忽略 */ }
+	          try { document.removeEventListener("mousedown", onOutside, true); } catch (e2) { /* 忽略 */ }
+	          if (box.isConnected === true) box.remove();
+	          if (polishToastEl === box) polishToastEl = null;
+	        };
+	        var onOutside = function (ev) {
+	          if (box.contains(ev.target) === true) return;
+	          closeToast();
+	        };
+	        var toastTimer = setTimeout(closeToast, 10000);
+	        document.addEventListener("mousedown", onOutside, true);
+	      } catch (e) { /* 忽略 */ }
+	    }
+	    function showPolishSpinner(btn) {
+	      // 内联 SVG 圆环：2πr ≈ 37.7，dash 26 + 12 露出一段弧；靠 CSS 旋转
+	      try {
+	        var ns = "http://www.w3.org/2000/svg";
+	        var svg = document.createElementNS(ns, "svg");
+	        svg.setAttribute("viewBox", "0 0 16 16");
+	        svg.setAttribute("width", "14");
+	        svg.setAttribute("height", "14");
+	        svg.setAttribute("aria-hidden", "true");
+	        var track = document.createElementNS(ns, "circle");
+	        track.setAttribute("cx", "8");
+	        track.setAttribute("cy", "8");
+	        track.setAttribute("r", "6");
+	        track.setAttribute("fill", "none");
+	        track.setAttribute("stroke", "currentColor");
+	        track.setAttribute("stroke-width", "2");
+	        track.setAttribute("opacity", "0.22");
+	        var arc = document.createElementNS(ns, "circle");
+	        arc.setAttribute("cx", "8");
+	        arc.setAttribute("cy", "8");
+	        arc.setAttribute("r", "6");
+	        arc.setAttribute("fill", "none");
+	        arc.setAttribute("stroke", "currentColor");
+	        arc.setAttribute("stroke-width", "2");
+	        arc.setAttribute("stroke-linecap", "round");
+	        arc.setAttribute("stroke-dasharray", "26 12");
+	        svg.appendChild(track);
+	        svg.appendChild(arc);
+	        btn.textContent = "";
+	        btn.appendChild(svg);
+	      } catch (e) {
+	        btn.textContent = "";
+	      }
+	    }
+	    function polishCurrentInput(btn) {
+	      if (btn === null || btn.getAttribute("data-zy-busy") === "1") return;
+	      var el = findComposerInput();
+	      if (el === null) { flashPolish(btn, "找不到输入框"); return; }
+	      // 空草稿也允许：host 会用上下文里最近的助手回复生成下一步指令
+	      var text = composerText(el);
+	      var route = currentModelRoute();
+	      if (route === null) { flashPolish(btn, "读不到当前模型"); return; }
+	      btn.setAttribute("data-zy-busy", "1");
+	      showPolishSpinner(btn);
+	      btn.title = "正在用 " + route.model + " 优化…";
+	      wireCall("avatar", "polishPrompt", {
+	        request: {
+	          text: text,
+	          provider: route.provider,
+	          model: route.model,
+	          sessionId: activeSessionId()
+	        }
+	      }).then(function (result) {
+	        btn.removeAttribute("data-zy-busy");
+	        btn.textContent = "✨";
+	        btn.title = "优化提示词";
+	        var next = result !== null && result !== void 0 && typeof result.text === "string" ? result.text : "";
+	        if (next.length === 0) { flashPolish(btn, "模型没返回内容"); return; }
+	        var ok = replaceComposerText(el, next);
+	        if (ok !== true) flashPolish(btn, "写回输入框失败");
+	      }, function (reason) {
+	        btn.removeAttribute("data-zy-busy");
+	        btn.textContent = "✨";
+	        btn.title = "优化提示词";
+	        var msg = String(reason && reason.message ? reason.message : reason);
+	        flashPolish(btn, msg);
+	      }).catch(function (err) {
+	        // .then 内部抛的异常也接住，统一走气泡
+	        btn.removeAttribute("data-zy-busy");
+	        btn.textContent = "✨";
+	        btn.title = "优化提示词";
+	        flashPolish(btn, "出错了：" + String(err && err.message ? err.message : err));
+	      });
+	    }
+	    // 模型胶囊 trigger：优先官方 aria/title「选择模型」；兜底含 data-provider-id 的 label
+	    function findModelTrigger() {
+	      try {
+	        var byLabel = ['button[aria-label="选择模型"]', 'button[title="选择模型"]', 'button[aria-label="Select model"]', 'button[title="Select model"]'];
+	        for (var c = 0; c < byLabel.length; c++) {
+	          var hits = document.querySelectorAll(byLabel[c]);
+	          for (var h = 0; h < hits.length; h++) {
+	            var hr = hits[h].getBoundingClientRect();
+	            if (hr.width > 0 && hr.height > 0) return hits[h];
+	          }
+	        }
+	        var labels = document.querySelectorAll('button [data-provider-id][data-model-id]');
+	        for (var i = 0; i < labels.length; i++) {
+	          var btn = labels[i].closest("button");
+	          if (btn === null) continue;
+	          var r = btn.getBoundingClientRect();
+	          if (r.width > 0 && r.height > 0) return btn;
+	        }
+	      } catch (e) { /* 忽略 */ }
+	      return null;
+	    }
+	    function syncPolishButton() {
+	      try {
+	        if (polishEnabled !== true) {
+	          if (polishBtnEl !== null && polishBtnEl.isConnected === true) polishBtnEl.remove();
+	          polishBtnEl = null;
+	          return;
+	        }
+	        var trigger = findModelTrigger();
+	        if (trigger === null) return;
+	        var wrap = trigger.parentElement;
+	        if (wrap === null) return;
+	        if (polishBtnEl === null || polishBtnEl.isConnected !== true) {
+	          // 插件重启/热更后旧按钮可能还留在 DOM：先认领，避免越插越多
+	          var adopted = wrap.querySelector('button[aria-label="优化提示词"]');
+	          if (adopted === null) adopted = document.querySelector('button[aria-label="优化提示词"]');
+	          if (adopted !== null) {
+	            polishBtnEl = adopted;
+	          } else {
+	            polishBtnEl = document.createElement("button");
+	            polishBtnEl.type = "button";
+	            polishBtnEl.className = "zy_polishBtn";
+	            polishBtnEl.title = "优化提示词";
+	            polishBtnEl.setAttribute("aria-label", "优化提示词");
+	            polishBtnEl.textContent = "✨";
+	            polishBtnEl.addEventListener("click", function (ev) {
+	              ev.preventDefault();
+	              ev.stopPropagation();
+	              polishCurrentInput(polishBtnEl);
+	            });
+	          }
+	        }
+	        // 清掉重复的同名按钮（重启/多实例残留），只留当前这一个
+	        var allBtns = document.querySelectorAll('button[aria-label="优化提示词"]');
+	        for (var bi = 0; bi < allBtns.length; bi++) {
+	          if (allBtns[bi] !== polishBtnEl) allBtns[bi].remove();
+	        }
+	        if (polishBtnEl.parentElement !== wrap || polishBtnEl.nextElementSibling !== trigger) {
+	          wrap.insertBefore(polishBtnEl, trigger);
+	        }
+	      } catch (e) { /* 忽略 */ }
+	    }
+
 	    // 插件停用/卸载时清理本插件写进 DOM 的东西：头像属性、缩进标记、内联变量、
 	    // 资源管理器按钮、导航图标标记、插件样式。只认本插件标记，不碰 React 属主节点。
 	    function disposeAvatarDom() {
@@ -691,6 +1010,10 @@ function nameEl(text, isUser) {
 	        for (var j = 0; j < icons.length; j++) icons[j].removeAttribute(ICON_MARK);
 	        if (explorerBtnEl !== null && explorerBtnEl.isConnected === true) explorerBtnEl.remove();
 	        explorerBtnEl = null;
+	        if (polishBtnEl !== null && polishBtnEl.isConnected === true) polishBtnEl.remove();
+	        polishBtnEl = null;
+	        if (polishToastEl !== null && polishToastEl.isConnected === true) polishToastEl.remove();
+	        polishToastEl = null;
 	        var styles = document.querySelectorAll('style[data-plugin="dsh-avatar"]');
 	        for (var k = 0; k < styles.length; k++) styles[k].remove();
 	      } catch (e) { /* 清理失败不阻塞停用流程 */ }
@@ -725,11 +1048,24 @@ function nameEl(text, isUser) {
 	        "[data-zy-run] [class*=\"runningContent\"]{margin-top:auto}" +
 	        // 用户消息气泡去掉背景（原内联样式改 CSS，React 重渲染也不丢）
 	        "[data-zy-av=\"user\"] [class*=\"bubble\"]{background:transparent!important;border:none!important;border-radius:0!important;padding:0!important}" +
-	        // 主界面资源管理器图标按钮：尺寸/圆角与官方 ghost 小按钮一致
-	        ".zy_explorerBtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-size:15px;line-height:1;cursor:pointer;padding:0}" +
-	        ".zy_explorerBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}";
-	      document.head.appendChild(tag);
-	    }
+		        // 主界面资源管理器图标按钮：尺寸/圆角与官方 ghost 小按钮一致
+		        ".zy_explorerBtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-size:15px;line-height:1;cursor:pointer;padding:0}" +
+		        ".zy_explorerBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}" +
+		        // 输入框提示词优化图标按钮：与模型胶囊同高，紧凑一点
+		        ".zy_polishBtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex:none;margin-right:2px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);font-size:14px;line-height:1;cursor:pointer;padding:0;transition:background .12s}" +
+		        ".zy_polishBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}" +
+		        // 优化中转圈：用内联 SVG 圆（该环境 border-radius 50% 会被渲染成圆角方块）
+		        ".zy_polishBtn[data-zy-busy=\"1\"]{cursor:progress;opacity:.9}" +
+		        ".zy_polishBtn[data-zy-busy=\"1\"] svg{display:block;animation:zy_polish_spin .8s linear infinite}" +
+		        "@keyframes zy_polish_spin{to{transform:rotate(360deg)}}" +
+		        ".zy_polishBtn[data-zy-error=\"1\"]{background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#e5484d) 22%,transparent)}" +
+		        // 失败提示气泡：贴在按钮上方，带「重试」
+		        ".zy_polishToast{position:fixed;left:0;top:0;transform:translateX(-50%);display:flex;align-items:center;gap:8px;width:max-content;max-width:340px;padding:7px 8px 7px 10px;border-radius:9px;background:var(--dsw-alias-bg-layer-3,#2a2a2c);border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.14));box-shadow:0 8px 24px rgba(0,0,0,.38);font-size:12px;line-height:1.45;color:var(--dsw-alias-label-primary);z-index:40}" +
+		        ".zy_polishToastText{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}" +
+		        ".zy_polishToastRetry{flex:none;border:0;border-radius:6px;padding:3px 9px;background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.1));color:inherit;font:inherit;font-size:12px;cursor:pointer}" +
+		        ".zy_polishToastRetry:hover{background:var(--dsw-alias-interactive-bg-active,rgba(255,255,255,.16))}";
+		      document.head.appendChild(tag);
+		    }
 	    /** 头像尺寸写进 CSS 变量：只作「运行中状态行第一帧」的 min-height 兜底。
 	     *  低频调用（加载/保存），拖动路径不经过这里（改变量会触发全文档样式重算）。 */
 	    function applySizeVar() {
@@ -1088,6 +1424,7 @@ function nameEl(text, isUser) {
 		          } catch (e) { /* 注入失败不拖垮页面 */ }
 	          patchNavIcon();
 	          syncExplorerButton();
+	          syncPolishButton();
 	          if (cfg !== null && cfg !== void 0 && cfg.wideChat === true) applyWideChatLock();
 	          ensureWideObserver();
 	        };
@@ -1167,6 +1504,7 @@ function nameEl(text, isUser) {
 	      enterNewline: "Enter 回车换行（发送：Ctrl+Enter 或点发送按钮）",
 	      wideChat: "对话宽度跟随窗口（锁定为最大）",
 	      explorerButton: "主界面添加资源管理器",
+	      polishButton: "主界面添加提示词优化（输入框左侧 ✨）",
 	      personaInject: "全局指令注入系统提示词",
 	      personaInjectOn: "已开启，新建会话立即生效",
 	      personaInjectOff: "已关闭",
@@ -1192,6 +1530,7 @@ function nameEl(text, isUser) {
 	      enterNewline: "Enter inserts a newline (send with Ctrl+Enter or the send button)",
 	      wideChat: "Chat width follows the window (locked to max)",
 	      explorerButton: "Explorer button on main UI",
+	      polishButton: "Prompt polish button on main UI (✨ beside the model pill)",
 	      personaInject: "Inject global directives into the system prompt",
 	      personaInjectOn: "Enabled. Applies to new sessions immediately.",
 	      personaInjectOff: "Disabled",
@@ -1235,6 +1574,7 @@ function nameEl(text, isUser) {
 	      var [notice, setNotice] = react.useState("");
 	      var [busy, setBusy] = react.useState(false);
 	      var [explorerOn, setExplorerOn] = react.useState(explorerFlag());
+	      var [polishOn, setPolishOn] = react.useState(polishFlag());
 	      var userFile = react.useRef(null);
 	      var assistantFile = react.useRef(null);
 	      var adopt = react.useCallback(function (next) {
@@ -1478,6 +1818,19 @@ function nameEl(text, isUser) {
 	          }),
 	          (0, jsxRuntime.jsx)("span", { children: t("explorerButton") })
 	        ] }),
+	        // 输入框「提示词优化」按钮：勾选后模型胶囊左边出现 ✨
+	        (0, jsxRuntime.jsxs)("label", { className: "dshav_toggle", style: { margin: "10px 0 6px" }, children: [
+	          (0, jsxRuntime.jsx)("input", {
+	            type: "checkbox",
+	            checked: polishOn === true,
+	            onChange: function (ev) {
+	              var on = ev.target.checked === true;
+	              setPolishOn(on);
+	              setPolishFlag(on);
+	            }
+	          }),
+	          (0, jsxRuntime.jsx)("span", { children: t("polishButton") })
+	        ] }),
 	        // 全局指令注入：把 ~/.dsh/AGENTS.md 挂进每个 agent 的系统提示词 section，
 	        // 每轮请求都带、压缩吃不掉。开关只写插件自己的 config.json，新建会话生效。
 	        (0, jsxRuntime.jsxs)("label", { className: "dshav_toggle", style: { margin: "10px 0 6px" }, children: [
@@ -1550,6 +1903,7 @@ function nameEl(text, isUser) {
 	    function apply(ctx) {
 	      pluginCtx = ctx;
 	      explorerEnabled = explorerFlag();
+	      polishEnabled = polishFlag();
 	      start();
 	      // 官方设置区槽位：与「通用设置/模型」同级，导航高亮与内容切换由设置壳管理。
 	      ctx.effect(function () {
