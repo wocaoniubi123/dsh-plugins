@@ -261,6 +261,20 @@ function hasPlaceholder(text) {
 	return false;
 }
 
+/** 把模型编的空壳按内容类别换成中性说法（只在「空输入框生成指令」时用）。 */
+function replacePlaceholders(text) {
+	return String(text).replace(/[\[［]([^\]］\n]{1,40})[\]］]/g, function (all, inner) {
+		var s = String(inner);
+		if (/field|字段|key|属性|props?/i.test(s)) return "相关字段";
+		if (/文件|file|path|路径|目录|dir/i.test(s)) return "相关文件";
+		if (/函数|function|方法|method|接口|api/i.test(s)) return "相关函数";
+		if (/按钮|button|控件|control/i.test(s)) return "相关按钮";
+		if (/任务|task|对象|object/i.test(s)) return "当前任务";
+		if (/时间|time|日期|date/i.test(s)) return "当前时间";
+		return "相关位置";
+	});
+}
+
 /**
  * 输出里是否有连续的 80 字片段出现在背景中。
  * 命中说明模型在复述资料（抄袭），而不是补全草稿。
@@ -595,13 +609,15 @@ var AvatarService = class extends Service {
 		var draftHasBracket = draft.indexOf("[") !== -1 || draft.indexOf("［") !== -1;
 		var draftLines = countLines(draft);
 		var limit = Math.max(2000, draft.length * 10);
+		// 空输入框是「生成指令」模式：指令里带命令/代码片段是正常的，不按润色的结构标准去卡
+		var isGenerate = draft.length === 0;
 		var checkPolish = function (text, background) {
 			if (text.length === 0) return "模型没返回内容，这次没改";
 			if (text.length > limit) return "模型写得太长，这次没改（输出 " + text.length + " 字，上限 " + limit + " 字）";
 			var lines = countLines(text);
-			var lineLimit = Math.max(40, draftLines * 3 + 10);
+			var lineLimit = isGenerate === true ? 60 : Math.max(40, draftLines * 3 + 10);
 			if (lines > lineLimit) return "模型写成了多段内容，不是一条指令，这次没改（输出 " + lines + " 行，上限 " + lineLimit + " 行）";
-			if (draft.indexOf("```") === -1 && text.indexOf("```") !== -1) return "模型写了代码块，这次没改";
+			if (isGenerate !== true && draft.indexOf("```") === -1 && text.indexOf("```") !== -1) return "模型写了代码块，这次没改";
 			if (draftHasBracket !== true && hasPlaceholder(text)) {
 				var hit = /[\[［][^\]］\n]{1,30}[\]］]/.exec(text);
 				return "没找到能对上的东西，这次没改（模型留了空壳：" + (hit === null ? "［…］" : hit[0]) + "）";
@@ -612,23 +628,33 @@ var AvatarService = class extends Service {
 
 		// 第一轮：带上下文
 		var polished = cleanPolishedText(parsePolishOutput(await runOnce(systemText, contextUser)));
+		// 生成模式下模型常留空壳：直接换成中性说法，不因为一个 [field.key] 丢掉整条指令
+		if (isGenerate === true && hasPlaceholder(polished)) polished = replacePlaceholders(polished);
 		self.info("polish: raw1 len=" + polished.length + " check=" + String(checkPolish(polished, contextText)) + " head=" + polished.slice(0, 120).replace(/\s+/g, " "));
 		var firstProblem = checkPolish(polished, contextText);
 
-		// 空草稿没有「通顺化」可做：失败了直接报错
-		if (firstProblem !== null && draft.length === 0) throw new Error(firstProblem);
-
-		// 其他不通过自动重试一次：只做「通顺化」，不许补背景、不许编对象（无上下文时最容易编）
+		// 不通过自动重试一次：生成模式下带上上下文重新生成；有草稿时只做「通顺化」
 		if (firstProblem !== null) {
-			self.info("polish: retry without context, reason=" + firstProblem);
-			var retryUser = "只把下面 <draft> 里的草稿改成一句通顺、完整的要求。\n" +
-				"这里没有背景信息：不要添加背景、不要指定文件或模块、不要编造对象和位置、不要分点、不要编时间。\n" +
-				"<draft>\n" + draft + "\n</draft>";
+			self.info("polish: retry, reason=" + firstProblem);
+			var retryUser;
+			if (isGenerate === true) {
+				retryUser = "输入框是空的。\n" +
+					"再看一遍 <reference> 里最近一轮助手回复：它做到哪、还差什么，据此生成一条可以直接发送给助手的下一步指令。\n" +
+					"禁止写任何 [xxx]、［xxx］ 形式的空壳占位符；找不到具体名字就用「当前这个功能」这类中性说法。\n\n" +
+					contextBlock;
+			} else {
+				retryUser = "只把下面 <draft> 里的草稿改成一句通顺、完整的要求。\n" +
+					"这里没有背景信息：不要添加背景、不要指定文件或模块、不要编造对象和位置、不要分点、不要编时间。\n" +
+					"<draft>\n" + draft + "\n</draft>";
+			}
 			polished = cleanPolishedText(parsePolishOutput(await runOnce(POLISH_SYSTEM_PROMPT, retryUser)));
-			var secondProblem = checkPolish(polished, "");
-			// 通顺化的结果不该比原话长太多，也不该出现文件路径
-			if (secondProblem === null && polished.length > Math.max(300, draft.length * 6)) secondProblem = "模型没找到对应内容，这次没改（把话写具体点再试）";
-			if (secondProblem === null && /[A-Za-z]:\\|\.(tsx|ts|js|json|md|py)\b/.test(polished)) secondProblem = "模型凭空写了文件，这次没改";
+			if (isGenerate === true && hasPlaceholder(polished)) polished = replacePlaceholders(polished);
+			var secondProblem = checkPolish(polished, isGenerate === true ? contextText : "");
+			if (isGenerate !== true) {
+				// 通顺化的结果不该比原话长太多，也不该出现文件路径
+				if (secondProblem === null && polished.length > Math.max(300, draft.length * 6)) secondProblem = "模型没找到对应内容，这次没改（把话写具体点再试）";
+				if (secondProblem === null && /[A-Za-z]:\\|\.(tsx|ts|js|json|md|py)\b/.test(polished)) secondProblem = "模型凭空写了文件，这次没改";
+			}
 			self.info("polish: raw2 len=" + polished.length + " check=" + String(secondProblem) + " head=" + polished.slice(0, 120).replace(/\s+/g, " "));
 			if (secondProblem !== null) throw new Error(secondProblem);
 		}

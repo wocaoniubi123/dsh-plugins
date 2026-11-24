@@ -692,7 +692,7 @@ function nameEl(text, isUser) {
 	      try { return String(el.innerText || "").replace(/\u00a0/g, " ").trim(); } catch (e) { return ""; }
 	    }
 	    // 当前会话模型：projectionsBySession[sessionId].values.modelSelection.next ?? lastUsed
-	    function currentModelRoute() {
+	    function projectedRouteSync() {
 	      try {
 	        if (pluginCtx === null) return null;
 	        var snap = pluginCtx.sessions.list.getSnapshot();
@@ -710,6 +710,66 @@ function nameEl(text, isUser) {
 	          reasoningEffort: typeof pick.reasoningEffort === "string" ? pick.reasoningEffort : ""
 	        };
 	      } catch (e) { return null; }
+	    }
+	    // 模型胶囊上显示的模型名（用于投影缺 modelSelection 时反查 provider）
+	    function capsuleModelName() {
+	      try {
+	        var btn = findModelTrigger();
+	        if (btn === null) return "";
+	        var label = btn.querySelector('span[class*="triggerLabel"]');
+	        var text = label !== null ? label.textContent : btn.textContent;
+	        return String(text || "").replace(/\s+/g, " ").trim();
+	      } catch (e) { return ""; }
+	    }
+	    // 宿主全局模型目录：remote.session.modelCatalog() → [{ provider, model, name }]
+	    function readModelCatalog() {
+	      try {
+	        if (pluginCtx === null) return Promise.resolve(null);
+	        var remote = pluginCtx.get("remote.session");
+	        if (remote === void 0 || remote === null || typeof remote.modelCatalog !== "function") return Promise.resolve(null);
+	        return Promise.resolve(remote.modelCatalog()).then(function (result) {
+	          if (result === void 0 || result === null || result.ok !== true) return null;
+	          var groups = result.value !== void 0 && Array.isArray(result.value.groups) ? result.value.groups : [];
+	          var out = [];
+	          for (var i = 0; i < groups.length; i++) {
+	            var group = groups[i];
+	            if (group === null || group === void 0) continue;
+	            var provider = typeof group.id === "string" ? group.id : (typeof group.provider === "string" ? group.provider : "");
+	            var models = Array.isArray(group.models) ? group.models : [];
+	            for (var j = 0; j < models.length; j++) {
+	              var m = models[j];
+	              if (m === null || m === void 0 || typeof m.id !== "string") continue;
+	              out.push({ provider: provider, model: m.id, name: typeof m.name === "string" ? m.name : m.id });
+	            }
+	          }
+	          return out;
+	        }, function () { return null; });
+	      } catch (e) { return Promise.resolve(null); }
+	    }
+	    // 用胶囊上的文字在目录里反查 provider/model（去掉「Max / High」这类档位后缀）
+	    function routeFromCapsuleText() {
+	      var text = capsuleModelName();
+	      if (text.length === 0) return Promise.resolve(null);
+	      return readModelCatalog().then(function (list) {
+	        if (list === null || list.length === 0) return null;
+	        var cleaned = text.replace(/\s*(Max|High|Medium|Low|Minimal|最高|高|中|低|最低)\s*$/i, "").trim();
+	        var hits = [];
+	        for (var i = 0; i < list.length; i++) {
+	          var item = list[i];
+	          if (item.name === cleaned || item.model === cleaned) { hits.push(item); continue; }
+	          if (cleaned.indexOf(item.name) === 0 || cleaned.indexOf(item.model) === 0) hits.push(item);
+	        }
+	        if (hits.length === 0) return null;
+	        // 取最长匹配，避免 flash 抢先于 flash-vision 之类的短名
+	        hits.sort(function (a, b) { return (b.name.length + b.model.length) - (a.name.length + a.model.length); });
+	        return { provider: hits[0].provider, model: hits[0].model, reasoningEffort: "" };
+	      });
+	    }
+	    // 先读投影；投影里没有 modelSelection（新会话/切换中）时用胶囊文本反查
+	    function currentModelRoute() {
+	      var direct = projectedRouteSync();
+	      if (direct !== null) return Promise.resolve(direct);
+	      return routeFromCapsuleText();
 	    }
 	    // 写回 Lexical：优先走编辑器自己的 EditorState（execCommand/input 会被编辑器吞掉），
 	    // 拿不到编辑器实例时退回「全选 + insertText」。
@@ -883,34 +943,29 @@ function nameEl(text, isUser) {
 	      if (el === null) { flashPolish(btn, "找不到输入框"); return; }
 	      // 空草稿也允许：host 会用上下文里最近的助手回复生成下一步指令
 	      var text = composerText(el);
-	      var route = currentModelRoute();
-	      if (route === null) { flashPolish(btn, "读不到当前模型"); return; }
-	      btn.setAttribute("data-zy-busy", "1");
-	      showPolishSpinner(btn);
-	      btn.title = "正在用 " + route.model + " 优化…";
-	      wireCall("avatar", "polishPrompt", {
-	        request: {
-	          text: text,
-	          provider: route.provider,
-	          model: route.model,
-	          sessionId: activeSessionId()
-	        }
-	      }).then(function (result) {
-	        btn.removeAttribute("data-zy-busy");
-	        btn.textContent = "✨";
-	        btn.title = "优化提示词";
-	        var next = result !== null && result !== void 0 && typeof result.text === "string" ? result.text : "";
-	        if (next.length === 0) { flashPolish(btn, "模型没返回内容"); return; }
-	        var ok = replaceComposerText(el, next);
-	        if (ok !== true) flashPolish(btn, "写回输入框失败");
-	      }, function (reason) {
-	        btn.removeAttribute("data-zy-busy");
-	        btn.textContent = "✨";
-	        btn.title = "优化提示词";
-	        var msg = String(reason && reason.message ? reason.message : reason);
-	        flashPolish(btn, msg);
+	      currentModelRoute().then(function (route) {
+	        if (route === null || route === void 0) { flashPolish(btn, "读不到当前模型"); return; }
+	        btn.setAttribute("data-zy-busy", "1");
+	        showPolishSpinner(btn);
+	        btn.title = "正在用 " + route.model + " 优化…";
+	        return wireCall("avatar", "polishPrompt", {
+	          request: {
+	            text: text,
+	            provider: route.provider,
+	            model: route.model,
+	            sessionId: activeSessionId()
+	          }
+	        }).then(function (result) {
+	          btn.removeAttribute("data-zy-busy");
+	          btn.textContent = "✨";
+	          btn.title = "优化提示词";
+	          var next = result !== null && result !== void 0 && typeof result.text === "string" ? result.text : "";
+	          if (next.length === 0) { flashPolish(btn, "模型没返回内容"); return; }
+	          var ok = replaceComposerText(el, next);
+	          if (ok !== true) flashPolish(btn, "写回输入框失败");
+	        });
 	      }).catch(function (err) {
-	        // .then 内部抛的异常也接住，统一走气泡
+	        // 路由解析或调用内部抛的异常也接住，统一走气泡
 	        btn.removeAttribute("data-zy-busy");
 	        btn.textContent = "✨";
 	        btn.title = "优化提示词";
@@ -1400,7 +1455,8 @@ function nameEl(text, isUser) {
 	            applyWideChatLock();
 	          }
 	        };
-	        // 低频对账：纯缓存校验（不读布局），兜住任何漏网的边界情况
+	        // 低频对账：纯缓存校验（不读布局），兜住任何漏网的边界情况；
+	        // 顺带重挂工具栏按钮——模型胶囊重建不一定进 MutationObserver 的扫描分支
 	        setInterval(function () {
 	          if (typeof document !== "undefined" && document.hidden === true) return;
 	          for (var i = 0; i < knownContainers.length; i++) {
@@ -1408,6 +1464,8 @@ function nameEl(text, isUser) {
 	            if (el.isConnected !== true) continue;
 	            try { scanContainerCached(el, true); } catch (e) { /* 跳过 */ }
 	          }
+	          try { syncExplorerButton(); } catch (e2) { /* 跳过 */ }
+	          try { syncPolishButton(); } catch (e3) { /* 跳过 */ }
 	        }, 2000);
 	          var scan = function () {
 	          try {
